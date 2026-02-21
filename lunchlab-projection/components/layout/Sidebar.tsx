@@ -10,6 +10,7 @@ const menuItems = [
   // { label: "발주 예측", href: "/forecast" },
   // { label: "고객 관리", href: "/clients" },
   // { label: "상품 관리", href: "/products" },
+  
 ];
 
 export function Sidebar() {
