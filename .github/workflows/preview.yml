@@ -1,13 +1,9 @@
 name: Vercel Preview Deployment
 
-on:
+"on":
   push:
     branches-ignore:
       - main
-
-defaults:
-  run:
-    working-directory: lunchlab-projection
 
 jobs:
   deploy-preview:
@@ -24,12 +20,15 @@ jobs:
           cache-dependency-path: lunchlab-projection/package-lock.json
 
       - name: Install dependencies
+        working-directory: lunchlab-projection
         run: npm ci
 
       - name: Type check
+        working-directory: lunchlab-projection
         run: npx tsc --noEmit
 
       - name: Lint
+        working-directory: lunchlab-projection
         run: npm run lint
 
       - name: Install Vercel CLI
