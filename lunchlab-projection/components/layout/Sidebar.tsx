@@ -7,10 +7,9 @@ import { Separator } from "@/components/ui/separator";
 // 메뉴 아이템 배열 — 나중에 여기에 추가하면 사이드바에 자동 반영
 const menuItems = [
   { label: "대시보드", href: "/dashboard" },
-  // { label: "발주 예측", href: "/forecast" },
-  // { label: "고객 관리", href: "/clients" },
-  // { label: "상품 관리", href: "/products" },
-  
+  { label: "발주 예상 산출", href: "/forecasts/new" },
+  { label: "발주 예상 목록", href: "/forecasts" },
+  { label: "상품 관리", href: "/products" },
 ];
 
 export function Sidebar() {
@@ -25,7 +24,8 @@ export function Sidebar() {
       {/* 네비게이션 메뉴 */}
       <nav className="flex flex-col gap-1">
         {menuItems.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive =
+            pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}

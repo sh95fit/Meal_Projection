@@ -1,0 +1,835 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Plus, Trash2, ArrowRight, Check, Send } from "lucide-react";
+import { toast } from "sonner";
+import type {
+  ProductWithMappings,
+  ForecastTarget,
+  OrderSummaryRow,
+  UnorderedAccountRow,
+  ForecastSummary,
+} from "@/types";
+
+// 로컬 타임존 기준 오늘 날짜
+function getToday(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+// 로컬 타임존 기준 날짜 더하기
+function addDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + days);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+// 날짜 문자열 → "2026-03-13(금)" 형태
+function formatDateWithDay(dateStr: string): string {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+  const dayName = dayNames[date.getDay()];
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}(${dayName})`;
+}
+
+interface UnorderedRow extends UnorderedAccountRow {
+  is_included: boolean;
+  adjusted_qty: number;
+}
+
+export default function ForecastNewPage() {
+  const [step, setStep] = useState(1);
+  const [products, setProducts] = useState<ProductWithMappings[]>([]);
+  const [targets, setTargets] = useState<ForecastTarget[]>([]);
+  const [currentTargetIndex, setCurrentTargetIndex] = useState(0);
+
+  // Step 2 상태
+  const [orderRows, setOrderRows] = useState<OrderSummaryRow[]>([]);
+  const [unorderedRows, setUnorderedRows] = useState<UnorderedRow[]>([]);
+  const [summary, setSummary] = useState<ForecastSummary | null>(null);
+  const [step2Loading, setStep2Loading] = useState(false);
+
+  // 완료된 forecasts
+  const [completedForecasts, setCompletedForecasts] = useState<
+    {
+      productName: string;
+      deliveryDate: string;
+      forecastQty: number;
+      forecastId: number;
+    }[]
+  >([]);
+
+  useEffect(() => {
+    fetch("/api/products")
+      .then((r) => r.json())
+      .then(setProducts)
+      .catch(() => toast.error("상품 목록을 불러오지 못했습니다."));
+  }, []);
+
+  // ===== STEP 1: 대상 지정 =====
+  const addTarget = () => {
+    if (products.length === 0) return;
+    const product = products[0];
+    setTargets([
+      ...targets,
+      {
+        product,
+        deliveryDate: addDays(getToday(), product.offset_days),
+      },
+    ]);
+  };
+
+  const updateTarget = (
+    index: number,
+    field: "product" | "deliveryDate",
+    value: unknown
+  ) => {
+    const updated = [...targets];
+    if (field === "product") {
+      const product = value as ProductWithMappings;
+      updated[index] = {
+        ...updated[index],
+        product,
+        deliveryDate: addDays(getToday(), product.offset_days),
+      };
+    } else {
+      updated[index] = { ...updated[index], deliveryDate: value as string };
+    }
+    setTargets(updated);
+  };
+
+  const removeTarget = (index: number) => {
+    setTargets(targets.filter((_, i) => i !== index));
+  };
+
+  // ===== STEP 2: 산출 =====
+  const loadOrderData = useCallback(async (target: ForecastTarget) => {
+    setStep2Loading(true);
+    try {
+      const [ordersRes, unorderedRes] = await Promise.all([
+        fetch(
+          `/api/forecasts/orders?date=${target.deliveryDate}&productId=${target.product.id}`
+        ),
+        fetch(
+          `/api/forecasts/unordered?date=${target.deliveryDate}&productId=${target.product.id}`
+        ),
+      ]);
+
+      const orders: OrderSummaryRow[] = await ordersRes.json();
+      const unordered: UnorderedAccountRow[] = await unorderedRes.json();
+
+      setOrderRows(orders);
+
+      const withDefaults: UnorderedRow[] = unordered.map((row) => ({
+        ...row,
+        is_included: row.주문요일_해당여부 === "포함",
+        adjusted_qty: Math.round(Number(row.상품_요일별_중간값) || 0),
+      }));
+      setUnorderedRows(withDefaults);
+
+      const totalOrderQty = orders.reduce(
+        (s: number, r: OrderSummaryRow) => s + Number(r.상품수량 || 0),
+        0
+      );
+      const orderedAccountCount = orders.length;
+      const unorderedAccountCount = unordered.length;
+      const orderDayAccountCount = unordered.filter(
+        (r: UnorderedAccountRow) => r.주문요일_해당여부 === "포함"
+      ).length;
+      const conditionNotMetRows = orders.filter(
+        (r: OrderSummaryRow) => r.조건충족여부 === "조건불충족"
+      );
+      const conditionNotMetCount = conditionNotMetRows.length;
+      const conditionNotMetQty = conditionNotMetRows.reduce(
+        (s: number, r: OrderSummaryRow) => s + Number(r.상품수량 || 0),
+        0
+      );
+
+      setSummary({
+        totalOrderQty,
+        orderedAccountCount,
+        unorderedAccountCount,
+        orderDayAccountCount,
+        conditionNotMetCount,
+        conditionNotMetQty,
+      });
+    } catch (e) {
+      console.error(e);
+      toast.error("데이터를 불러오지 못했습니다.");
+    } finally {
+      setStep2Loading(false);
+    }
+  }, []);
+
+  const startStep2 = () => {
+    if (targets.length === 0) {
+      toast.error("최소 1개의 산출 대상을 지정해주세요.");
+      return;
+    }
+    setStep(2);
+    setCurrentTargetIndex(0);
+    loadOrderData(targets[0]);
+  };
+
+  const toggleIncluded = (accountId: number) => {
+    setUnorderedRows((prev) =>
+      prev.map((r) =>
+        r.account_id === accountId ? { ...r, is_included: !r.is_included } : r
+      )
+    );
+  };
+
+  const updateAdjustedQty = (accountId: number, qty: number) => {
+    setUnorderedRows((prev) =>
+      prev.map((r) =>
+        r.account_id === accountId ? { ...r, adjusted_qty: qty } : r
+      )
+    );
+  };
+
+  const additionalQty = unorderedRows
+    .filter((r) => r.is_included)
+    .reduce((s, r) => s + Number(r.adjusted_qty || 0), 0);
+  const confirmedQty = Number(summary?.totalOrderQty || 0);
+  const totalForecastQty = confirmedQty + additionalQty;
+
+  const confirmForecast = async () => {
+    const target = targets[currentTargetIndex];
+
+    const details = unorderedRows.map((r) => ({
+      account_id: r.account_id,
+      account_name: r.고객사명,
+      is_included: r.is_included,
+      default_qty: Math.round(Number(r.상품_요일별_중간값) || 0),
+      adjusted_qty: r.adjusted_qty,
+      reference_data: {
+        전체_평균: r.전체_평균,
+        전체_중간값: r.전체_중간값,
+        상품_전체_평균: r.상품_전체_평균,
+        상품_전체_중간값: r.상품_전체_중간값,
+        요일별_평균: r.요일별_평균,
+        요일별_중간값: r.요일별_중간값,
+        상품_요일별_평균: r.상품_요일별_평균,
+        상품_요일별_중간값: r.상품_요일별_중간값,
+        해당요일_최근주문일자: r.해당요일_최근주문일자,
+        해당요일_주문횟수: r.해당요일_주문횟수,
+        주문요일_해당여부: r.주문요일_해당여부,
+      },
+    }));
+
+    try {
+      const res = await fetch("/api/forecasts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_id: target.product.id,
+          delivery_date: target.deliveryDate,
+          confirmed_order_qty: confirmedQty,
+          additional_forecast_qty: additionalQty,
+          forecast_qty: totalForecastQty,
+          details,
+        }),
+      });
+
+      const result = await res.json();
+
+      setCompletedForecasts((prev) => [
+        ...prev,
+        {
+          productName: target.product.product_name,
+          deliveryDate: target.deliveryDate,
+          forecastQty: totalForecastQty,
+          forecastId: result.id,
+        },
+      ]);
+
+      toast.success(
+        `${target.product.product_name} 발주 예상 수량이 확정되었습니다.`
+      );
+
+      if (currentTargetIndex < targets.length - 1) {
+        const nextIndex = currentTargetIndex + 1;
+        setCurrentTargetIndex(nextIndex);
+        loadOrderData(targets[nextIndex]);
+      } else {
+        setStep(3);
+      }
+    } catch {
+      toast.error("저장에 실패했습니다.");
+    }
+  };
+
+  // ===== STEP 3: 알림 발송 =====
+  const sendNotifications = async () => {
+    const groupMap = new Map<
+      string,
+      {
+        groupName: string;
+        date: string;
+        items: { productName: string; qty: number }[];
+      }
+    >();
+
+    for (const f of completedForecasts) {
+      const target = targets.find(
+        (t) =>
+          t.product.product_name === f.productName &&
+          t.deliveryDate === f.deliveryDate
+      );
+      const groupKey =
+        target?.product.notification_group || f.productName;
+
+      if (!groupMap.has(groupKey + f.deliveryDate)) {
+        groupMap.set(groupKey + f.deliveryDate, {
+          groupName: groupKey,
+          date: f.deliveryDate,
+          items: [],
+        });
+      }
+      groupMap.get(groupKey + f.deliveryDate)!.items.push({
+        productName: f.productName,
+        qty: f.forecastQty,
+      });
+    }
+
+    const groups = Array.from(groupMap.values()).map((g) => ({
+      ...g,
+      totalQty: g.items.reduce((s, i) => s + i.qty, 0),
+    }));
+
+    try {
+      await fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "forecast-complete",
+          data: { groups },
+        }),
+      });
+      toast.success("잔디 알림이 발송되었습니다.");
+      setStep(4);
+    } catch {
+      toast.error("알림 발송에 실패했습니다.");
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-7xl">
+      {/* Step Indicator */}
+      <div className="flex items-center gap-2">
+        {[1, 2, 3, 4].map((s) => (
+          <div key={s} className="flex items-center gap-2">
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                step >= s
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {step > s ? <Check className="h-4 w-4" /> : s}
+            </div>
+            <span
+              className={`text-sm ${step >= s ? "font-medium" : "text-muted-foreground"}`}
+            >
+              {s === 1
+                ? "대상 지정"
+                : s === 2
+                  ? "수량 산출"
+                  : s === 3
+                    ? "알림 발송"
+                    : "완료"}
+            </span>
+            {s < 4 && (
+              <ArrowRight className="h-4 w-4 text-muted-foreground mx-1" />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* ===== STEP 1 ===== */}
+      {step === 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>STEP 1. 산출 대상 지정</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {targets.map((target, idx) => (
+              <div
+                key={idx}
+                className="flex items-end gap-3 p-3 border rounded-lg"
+              >
+                <div className="flex-1 space-y-1">
+                  <Label>상품</Label>
+                  <Select
+                    value={String(target.product.id)}
+                    onValueChange={(v) => {
+                      const p = products.find((p) => p.id === parseInt(v));
+                      if (p) updateTarget(idx, "product", p);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products.map((p) => (
+                        <SelectItem key={p.id} value={String(p.id)}>
+                          {p.product_name} (D+{p.offset_days})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>발주일</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="date"
+                      value={target.deliveryDate}
+                      onChange={(e) =>
+                        updateTarget(idx, "deliveryDate", e.target.value)
+                      }
+                      className="w-44"
+                    />
+                    <span className="text-sm font-semibold text-primary whitespace-nowrap min-w-[100px]">
+                      {formatDateWithDay(target.deliveryDate)}
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeTarget(idx)}
+                >
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </div>
+            ))}
+
+            <Button variant="outline" onClick={addTarget}>
+              <Plus className="mr-2 h-4 w-4" />
+              대상 추가
+            </Button>
+
+            <div className="flex justify-end pt-4">
+              <Button onClick={startStep2} disabled={targets.length === 0}>
+                다음: 수량 산출
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== STEP 2 ===== */}
+      {step === 2 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">
+              STEP 2. 수량 산출 —{" "}
+              {targets[currentTargetIndex]?.product.product_name}
+              <span className="ml-3 text-base font-normal text-muted-foreground">
+                발주일:{" "}
+                <span className="font-semibold text-foreground">
+                  {formatDateWithDay(
+                    targets[currentTargetIndex]?.deliveryDate
+                  )}
+                </span>
+              </span>
+            </h2>
+            <Badge>
+              {currentTargetIndex + 1} / {targets.length}
+            </Badge>
+          </div>
+
+          {step2Loading ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <p className="text-muted-foreground">
+                  데이터를 불러오는 중...
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              {/* 요약 정보 */}
+              {summary && (
+                <div className="grid grid-cols-3 gap-4">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-2xl font-bold">
+                        {summary.totalOrderQty}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        주문 확정 수량
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-2xl font-bold">
+                        {summary.orderedAccountCount} /{" "}
+                        {summary.unorderedAccountCount}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        주문 / 미주문 고객사
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-2xl font-bold">
+                        {summary.conditionNotMetCount}건 (
+                        {summary.conditionNotMetQty}개)
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        조건 미충족
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {/* 주문 확정 고객사 테이블 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    주문 확정 고객사 ({orderRows.length}개사)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="max-h-64 overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>고객사명</TableHead>
+                          <TableHead>채널</TableHead>
+                          <TableHead>조건</TableHead>
+                          <TableHead className="text-right">
+                            상품수량
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {orderRows.map((row, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>{row.고객사명}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{row.주문채널}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  row.조건충족여부 === "조건충족"
+                                    ? "default"
+                                    : "destructive"
+                                }
+                              >
+                                {row.조건충족여부}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {row.상품수량}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 미주문 고객사 — 전체 레퍼런스 표시 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    미주문 고객사 ({unorderedRows.length}개사) — 수량 반영
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <div className="max-h-[500px] overflow-y-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-12 sticky left-0 bg-white z-10">
+                              포함
+                            </TableHead>
+                            <TableHead className="sticky left-12 bg-white z-10 min-w-[120px]">
+                              고객사명
+                            </TableHead>
+                            <TableHead className="text-center min-w-[52px]">
+                              해당
+                            </TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              전체
+                              <br />
+                              평균
+                            </TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              전체
+                              <br />
+                              중간값
+                            </TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              상품
+                              <br />
+                              전체평균
+                            </TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              상품
+                              <br />
+                              전체중간
+                            </TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              요일
+                              <br />
+                              평균
+                            </TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              요일
+                              <br />
+                              중간값
+                            </TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              상품
+                              <br />
+                              요일평균
+                            </TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              상품
+                              <br />
+                              요일중간
+                            </TableHead>
+                            <TableHead className="text-right min-w-[80px]">
+                              최근 주문
+                            </TableHead>
+                            <TableHead className="text-right min-w-[48px]">
+                              주문
+                              <br />
+                              횟수
+                            </TableHead>
+                            <TableHead className="text-right min-w-[88px] sticky right-0 bg-white z-10">
+                              반영 수량
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {unorderedRows.map((row) => (
+                            <TableRow
+                              key={row.account_id}
+                              className={
+                                row.is_included ? "" : "opacity-40"
+                              }
+                            >
+                              <TableCell className="sticky left-0 bg-white z-10">
+                                <Checkbox
+                                  checked={row.is_included}
+                                  onCheckedChange={() =>
+                                    toggleIncluded(row.account_id)
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium sticky left-12 bg-white z-10">
+                                {row.고객사명}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge
+                                  variant={
+                                    row.주문요일_해당여부 === "포함"
+                                      ? "default"
+                                      : "secondary"
+                                  }
+                                  className="text-xs"
+                                >
+                                  {row.주문요일_해당여부}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {row.전체_평균}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {row.전체_중간값}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {row.상품_전체_평균}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {row.상품_전체_중간값}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {row.요일별_평균}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {row.요일별_중간값}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums font-semibold">
+                                {row.상품_요일별_평균}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums font-semibold">
+                                {row.상품_요일별_중간값}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {row.해당요일_최근주문일자 || "-"}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {row.해당요일_주문횟수}
+                              </TableCell>
+                              <TableCell className="text-right sticky right-0 bg-white z-10">
+                                <Input
+                                  type="number"
+                                  className="w-20 text-right h-8 text-sm"
+                                  value={row.adjusted_qty}
+                                  onChange={(e) =>
+                                    updateAdjustedQty(
+                                      row.account_id,
+                                      parseInt(e.target.value) || 0
+                                    )
+                                  }
+                                  disabled={!row.is_included}
+                                  min={0}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 합계 및 확정 */}
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <div className="flex gap-6 text-sm">
+                        <span>
+                          주문 확정:{" "}
+                          <strong>{confirmedQty}</strong>
+                        </span>
+                        <span>
+                          + 추가 예상:{" "}
+                          <strong>{additionalQty}</strong>
+                        </span>
+                        <span className="text-lg">
+                          = 최종:{" "}
+                          <strong className="text-primary">
+                            {totalForecastQty}
+                          </strong>
+                        </span>
+                      </div>
+                    </div>
+                    <Button onClick={confirmForecast} size="lg">
+                      <Check className="mr-2 h-4 w-4" />
+                      확정
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ===== STEP 3: 알림 발송 ===== */}
+      {step === 3 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>STEP 3. 알림 발송</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-muted-foreground">
+              모든 상품의 발주 예상 수량이 확정되었습니다. 아래 내용을 확인 후
+              잔디 알림을 발송하세요.
+            </p>
+            <div className="space-y-2">
+              {completedForecasts.map((f, idx) => (
+                <div
+                  key={idx}
+                  className="flex justify-between p-3 border rounded"
+                >
+                  <span className="font-medium">
+                    {f.productName} —{" "}
+                    <span className="text-muted-foreground">
+                      {formatDateWithDay(f.deliveryDate)}
+                    </span>
+                  </span>
+                  <span className="font-bold">{f.forecastQty} 개</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end pt-4">
+              <Button onClick={sendNotifications}>
+                <Send className="mr-2 h-4 w-4" />
+                잔디 알림 발송
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ===== STEP 4: 완료 ===== */}
+      {step === 4 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>산출 완료</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-muted-foreground">
+              발주 예상 수량 산출 및 알림 발송이 완료되었습니다.
+            </p>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={() => (window.location.href = "/forecasts")}
+              >
+                발주 목록 보기
+              </Button>
+              <Button
+                onClick={() => {
+                  setStep(1);
+                  setTargets([]);
+                  setCompletedForecasts([]);
+                  setCurrentTargetIndex(0);
+                }}
+              >
+                새로운 산출 시작
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
