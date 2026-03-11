@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, ArrowRight, Check, Send } from "lucide-react";
+import { Plus, Trash2, ArrowRight, Check, Send, Search } from "lucide-react";
 import { toast } from "sonner";
 import type {
   ProductWithMappings,
@@ -32,7 +32,8 @@ import type {
   ForecastSummary,
 } from "@/types";
 
-// 로컬 타임존 기준 오늘 날짜
+// ─── 유틸리티 함수 ───
+
 function getToday(): string {
   const now = new Date();
   const year = now.getFullYear();
@@ -41,7 +42,6 @@ function getToday(): string {
   return `${year}-${month}-${day}`;
 }
 
-// 로컬 타임존 기준 날짜 더하기
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(y, m - 1, d);
@@ -52,7 +52,6 @@ function addDays(dateStr: string, days: number): string {
   return `${year}-${month}-${day}`;
 }
 
-// 날짜 문자열 → "2026-03-13(금)" 형태
 function formatDateWithDay(dateStr: string): string {
   if (!dateStr) return "";
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -62,10 +61,15 @@ function formatDateWithDay(dateStr: string): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}(${dayName})`;
 }
 
+// ─── 타입 ───
+
 interface UnorderedRow extends UnorderedAccountRow {
   is_included: boolean;
   adjusted_qty: number;
 }
+
+type IncludeFilter = "all" | "included" | "excluded";
+type RecentOrderFilter = "all" | "has" | "none";
 
 export default function ForecastNewPage() {
   const [step, setStep] = useState(1);
@@ -79,12 +83,25 @@ export default function ForecastNewPage() {
   const [summary, setSummary] = useState<ForecastSummary | null>(null);
   const [step2Loading, setStep2Loading] = useState(false);
 
+  // ★ 수정1: 미주문 고객사 검색/필터
+  const [searchQuery, setSearchQuery] = useState("");
+  const [includeFilter, setIncludeFilter] = useState<IncludeFilter>("all");
+  const [recentOrderFilter, setRecentOrderFilter] =
+    useState<RecentOrderFilter>("all");
+
+  // ★ 수정2: 여유 버퍼
+  const [bufferQty, setBufferQty] = useState(0);
+
+  // ★ 수정3: 확정 버튼 중복 클릭 방지
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // 완료된 forecasts
   const [completedForecasts, setCompletedForecasts] = useState<
     {
       productName: string;
       deliveryDate: string;
       forecastQty: number;
+      bufferQty: number;
       forecastId: number;
     }[]
   >([]);
@@ -95,6 +112,25 @@ export default function ForecastNewPage() {
       .then(setProducts)
       .catch(() => toast.error("상품 목록을 불러오지 못했습니다."));
   }, []);
+
+  // ★ 수정1: 필터링된 미주문 고객사 목록
+  const filteredUnorderedRows = unorderedRows.filter((row) => {
+    // 고객사명 검색
+    if (
+      searchQuery &&
+      !row.고객사명.toLowerCase().includes(searchQuery.toLowerCase())
+    ) {
+      return false;
+    }
+    // 포함/미포함 필터
+    if (includeFilter === "included" && !row.is_included) return false;
+    if (includeFilter === "excluded" && row.is_included) return false;
+    // 최근 주문 필터
+    if (recentOrderFilter === "has" && !row.해당요일_최근주문일자) return false;
+    if (recentOrderFilter === "none" && row.해당요일_최근주문일자) return false;
+
+    return true;
+  });
 
   // ===== STEP 1: 대상 지정 =====
   const addTarget = () => {
@@ -135,6 +171,13 @@ export default function ForecastNewPage() {
   // ===== STEP 2: 산출 =====
   const loadOrderData = useCallback(async (target: ForecastTarget) => {
     setStep2Loading(true);
+    // 필터/검색 초기화
+    setSearchQuery("");
+    setIncludeFilter("all");
+    setRecentOrderFilter("all");
+    setBufferQty(0);
+    setIsSubmitting(false);
+
     try {
       const [ordersRes, unorderedRes] = await Promise.all([
         fetch(
@@ -217,13 +260,18 @@ export default function ForecastNewPage() {
     );
   };
 
+  // ★ 수정2: 합계에 여유 버퍼 포함
   const additionalQty = unorderedRows
     .filter((r) => r.is_included)
     .reduce((s, r) => s + Number(r.adjusted_qty || 0), 0);
   const confirmedQty = Number(summary?.totalOrderQty || 0);
-  const totalForecastQty = confirmedQty + additionalQty;
+  const totalForecastQty = confirmedQty + additionalQty + bufferQty;
 
+  // ★ 수정3: 확정 — 중복 클릭 방지
   const confirmForecast = async () => {
+    if (isSubmitting) return; // 이미 제출 중이면 무시
+    setIsSubmitting(true);
+
     const target = targets[currentTargetIndex];
 
     const details = unorderedRows.map((r) => ({
@@ -256,6 +304,7 @@ export default function ForecastNewPage() {
           delivery_date: target.deliveryDate,
           confirmed_order_qty: confirmedQty,
           additional_forecast_qty: additionalQty,
+          buffer_qty: bufferQty,
           forecast_qty: totalForecastQty,
           details,
         }),
@@ -263,12 +312,19 @@ export default function ForecastNewPage() {
 
       const result = await res.json();
 
+      if (!res.ok) {
+        toast.error(result.error || "저장에 실패했습니다.");
+        setIsSubmitting(false);
+        return;
+      }
+
       setCompletedForecasts((prev) => [
         ...prev,
         {
           productName: target.product.product_name,
           deliveryDate: target.deliveryDate,
           forecastQty: totalForecastQty,
+          bufferQty: bufferQty,
           forecastId: result.id,
         },
       ]);
@@ -286,6 +342,7 @@ export default function ForecastNewPage() {
       }
     } catch {
       toast.error("저장에 실패했습니다.");
+      setIsSubmitting(false);
     }
   };
 
@@ -296,7 +353,7 @@ export default function ForecastNewPage() {
       {
         groupName: string;
         date: string;
-        items: { productName: string; qty: number }[];
+        items: { productName: string; qty: number; buffer: number }[];
       }
     >();
 
@@ -306,8 +363,7 @@ export default function ForecastNewPage() {
           t.product.product_name === f.productName &&
           t.deliveryDate === f.deliveryDate
       );
-      const groupKey =
-        target?.product.notification_group || f.productName;
+      const groupKey = target?.product.notification_group || f.productName;
 
       if (!groupMap.has(groupKey + f.deliveryDate)) {
         groupMap.set(groupKey + f.deliveryDate, {
@@ -319,6 +375,7 @@ export default function ForecastNewPage() {
       groupMap.get(groupKey + f.deliveryDate)!.items.push({
         productName: f.productName,
         qty: f.forecastQty,
+        buffer: f.bufferQty,
       });
     }
 
@@ -568,12 +625,78 @@ export default function ForecastNewPage() {
                 </CardContent>
               </Card>
 
-              {/* 미주문 고객사 — 전체 레퍼런스 표시 */}
+              {/* ★ 수정1: 미주문 고객사 — 검색/필터 추가 */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">
-                    미주문 고객사 ({unorderedRows.length}개사) — 수량 반영
-                  </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">
+                      미주문 고객사 ({unorderedRows.length}개사) — 수량 반영
+                    </CardTitle>
+                    <span className="text-sm text-muted-foreground">
+                      표시: {filteredUnorderedRows.length}개사
+                    </span>
+                  </div>
+                  {/* 검색 + 필터 바 */}
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                    {/* 고객사 검색 */}
+                    <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="고객사명 검색..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-8 h-9"
+                      />
+                    </div>
+                    {/* 포함/미포함 필터 */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground mr-1">
+                        포함:
+                      </span>
+                      {(
+                        [
+                          ["all", "전체"],
+                          ["included", "포함"],
+                          ["excluded", "미포함"],
+                        ] as const
+                      ).map(([val, label]) => (
+                        <Badge
+                          key={val}
+                          variant={
+                            includeFilter === val ? "default" : "outline"
+                          }
+                          className="cursor-pointer text-xs"
+                          onClick={() => setIncludeFilter(val)}
+                        >
+                          {label}
+                        </Badge>
+                      ))}
+                    </div>
+                    {/* 최근 주문 필터 */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground mr-1">
+                        최근주문:
+                      </span>
+                      {(
+                        [
+                          ["all", "전체"],
+                          ["has", "있음"],
+                          ["none", "없음"],
+                        ] as const
+                      ).map(([val, label]) => (
+                        <Badge
+                          key={val}
+                          variant={
+                            recentOrderFilter === val ? "default" : "outline"
+                          }
+                          className="cursor-pointer text-xs"
+                          onClick={() => setRecentOrderFilter(val)}
+                        >
+                          {label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
@@ -644,7 +767,7 @@ export default function ForecastNewPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {unorderedRows.map((row) => (
+                          {filteredUnorderedRows.map((row) => (
                             <TableRow
                               key={row.account_id}
                               className={
@@ -721,6 +844,22 @@ export default function ForecastNewPage() {
                               </TableCell>
                             </TableRow>
                           ))}
+                          {filteredUnorderedRows.length === 0 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={14}
+                                className="text-center py-6"
+                              >
+                                <p className="text-muted-foreground text-sm">
+                                  {searchQuery ||
+                                  includeFilter !== "all" ||
+                                  recentOrderFilter !== "all"
+                                    ? "필터 조건에 맞는 고객사가 없습니다."
+                                    : "미주문 고객사가 없습니다."}
+                                </p>
+                              </TableCell>
+                            </TableRow>
+                          )}
                         </TableBody>
                       </Table>
                     </div>
@@ -728,32 +867,61 @@ export default function ForecastNewPage() {
                 </CardContent>
               </Card>
 
-              {/* 합계 및 확정 */}
+              {/* ★ 수정2: 합계 및 확정 — 여유 버퍼 포함 */}
               <Card>
                 <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <div className="flex gap-6 text-sm">
-                        <span>
-                          주문 확정:{" "}
-                          <strong>{confirmedQty}</strong>
-                        </span>
-                        <span>
-                          + 추가 예상:{" "}
-                          <strong>{additionalQty}</strong>
-                        </span>
-                        <span className="text-lg">
-                          = 최종:{" "}
-                          <strong className="text-primary">
-                            {totalForecastQty}
-                          </strong>
-                        </span>
-                      </div>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                      <span>
+                        주문 확정:{" "}
+                        <strong>{confirmedQty}</strong>
+                      </span>
+                      <span>
+                        + 추가 예상:{" "}
+                        <strong>{additionalQty}</strong>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        + 여유분:
+                        <Input
+                          type="number"
+                          className="w-20 h-8 text-right text-sm"
+                          value={bufferQty}
+                          onChange={(e) =>
+                            setBufferQty(parseInt(e.target.value) || 0)
+                          }
+                          min={0}
+                          placeholder="0"
+                        />
+                      </span>
+                      <span className="text-lg">
+                        = 최종:{" "}
+                        <strong className="text-primary">
+                          {totalForecastQty}
+                        </strong>
+                      </span>
                     </div>
-                    <Button onClick={confirmForecast} size="lg">
-                      <Check className="mr-2 h-4 w-4" />
-                      확정
-                    </Button>
+                    {bufferQty > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        * 여유분 {bufferQty}개가 최종 수량에 포함됩니다.
+                      </p>
+                    )}
+                    {/* ★ 수정3: 확정 버튼 — disabled 처리 */}
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={confirmForecast}
+                        size="lg"
+                        disabled={isSubmitting}
+                      >
+                        {isSubmitting ? (
+                          "처리 중..."
+                        ) : (
+                          <>
+                            <Check className="mr-2 h-4 w-4" />
+                            확정
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -777,7 +945,7 @@ export default function ForecastNewPage() {
               {completedForecasts.map((f, idx) => (
                 <div
                   key={idx}
-                  className="flex justify-between p-3 border rounded"
+                  className="flex justify-between items-center p-3 border rounded"
                 >
                   <span className="font-medium">
                     {f.productName} —{" "}
@@ -785,7 +953,14 @@ export default function ForecastNewPage() {
                       {formatDateWithDay(f.deliveryDate)}
                     </span>
                   </span>
-                  <span className="font-bold">{f.forecastQty} 개</span>
+                  <div className="text-right">
+                    <span className="font-bold">{f.forecastQty} 개</span>
+                    {f.bufferQty > 0 && (
+                      <span className="text-xs text-muted-foreground ml-2">
+                        (여유분 {f.bufferQty} 포함)
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -822,6 +997,8 @@ export default function ForecastNewPage() {
                   setTargets([]);
                   setCompletedForecasts([]);
                   setCurrentTargetIndex(0);
+                  setBufferQty(0);
+                  setIsSubmitting(false);
                 }}
               >
                 새로운 산출 시작

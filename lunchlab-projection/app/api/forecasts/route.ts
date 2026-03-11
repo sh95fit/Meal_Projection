@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(forecasts);
 }
 
-// POST /api/forecasts — 예상 수량 확정 저장
+// POST /api/forecasts — 예상 수량 확정 저장 (upsert)
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const body = await request.json();
@@ -51,11 +51,12 @@ export async function POST(request: NextRequest) {
     delivery_date,
     confirmed_order_qty,
     additional_forecast_qty,
+    buffer_qty,
     forecast_qty,
     details,
   } = body;
 
-  // upsert: 동일 product_id + delivery_date 조합은 1건만
+  // ★ 수정4: 동일 product_id + delivery_date 조합은 최신으로 덮어쓰기 (upsert)
   const { data: existing } = await supabase
     .from("order_forecasts")
     .select("id")
@@ -66,12 +67,13 @@ export async function POST(request: NextRequest) {
   let forecastId: number;
 
   if (existing) {
-    // 기존 레코드 업데이트
+    // 기존 레코드 업데이트 → 최신 값으로 덮어쓰기
     const { error } = await supabase
       .from("order_forecasts")
       .update({
         confirmed_order_qty,
         additional_forecast_qty,
+        buffer_qty: buffer_qty || 0,
         forecast_qty,
         calculated_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -84,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     forecastId = existing.id;
 
-    // 기존 details 삭제
+    // 기존 details 삭제 후 새로 삽입
     await supabase
       .from("forecast_details")
       .delete()
@@ -98,6 +100,7 @@ export async function POST(request: NextRequest) {
         delivery_date,
         confirmed_order_qty,
         additional_forecast_qty,
+        buffer_qty: buffer_qty || 0,
         forecast_qty,
       })
       .select()
