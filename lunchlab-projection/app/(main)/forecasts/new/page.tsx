@@ -523,7 +523,7 @@ export default function ForecastNewPage() {
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label>발주일</Label>
+                  <Label>출고일</Label>
                   <div className="flex items-center gap-2">
                     <Input
                       type="date"
@@ -571,7 +571,7 @@ export default function ForecastNewPage() {
               STEP 2. 수량 산출 —{" "}
               {targets[currentTargetIndex]?.product.product_name}
               <span className="ml-3 text-base font-normal text-muted-foreground">
-                발주일:{" "}
+                출고일:{" "}
                 <span className="font-semibold text-foreground">
                   {formatDateWithDay(
                     targets[currentTargetIndex]?.deliveryDate
