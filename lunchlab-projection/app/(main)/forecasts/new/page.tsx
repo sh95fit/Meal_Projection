@@ -699,9 +699,8 @@ export default function ForecastNewPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="overflow-x-auto">
-                    <div className="max-h-[500px] overflow-y-auto">
-                      <Table>
+                  <div className="max-h-[500px] overflow-y-auto">
+                      <Table containerClassName="overflow-visible">
                         <TableHeader>
                           <TableRow>
                             <TableHead className="w-12 sticky left-0 bg-white z-10">
@@ -863,7 +862,6 @@ export default function ForecastNewPage() {
                         </TableBody>
                       </Table>
                     </div>
-                  </div>
                 </CardContent>
               </Card>
 
