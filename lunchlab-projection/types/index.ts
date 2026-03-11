@@ -68,6 +68,15 @@ export interface OrderSummaryRow {
   조건충족여부: string;
   상품수량: number;
   총주문수량: number;
+  // ★ 조건불충족 고객사 기준 데이터 (조건충족 고객사는 모두 0)
+  ref_전체_평균: number;
+  ref_전체_중간값: number;
+  ref_상품_전체_평균: number;
+  ref_상품_전체_중간값: number;
+  ref_요일별_평균: number;
+  ref_요일별_중간값: number;
+  ref_상품_요일별_평균: number;
+  ref_상품_요일별_중간값: number;
 }
 
 export interface UnorderedAccountRow {

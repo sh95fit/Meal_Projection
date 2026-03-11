@@ -68,6 +68,10 @@ interface UnorderedRow extends UnorderedAccountRow {
   adjusted_qty: number;
 }
 
+interface OrderRow extends OrderSummaryRow {
+  adjusted_qty: number;
+}
+
 type IncludeFilter = "all" | "included" | "excluded";
 type RecentOrderFilter = "all" | "has" | "none";
 
@@ -78,21 +82,21 @@ export default function ForecastNewPage() {
   const [currentTargetIndex, setCurrentTargetIndex] = useState(0);
 
   // Step 2 상태
-  const [orderRows, setOrderRows] = useState<OrderSummaryRow[]>([]);
+  const [orderRows, setOrderRows] = useState<OrderRow[]>([]);
   const [unorderedRows, setUnorderedRows] = useState<UnorderedRow[]>([]);
   const [summary, setSummary] = useState<ForecastSummary | null>(null);
   const [step2Loading, setStep2Loading] = useState(false);
 
-  // ★ 수정1: 미주문 고객사 검색/필터
+  // 미주문 고객사 검색/필터
   const [searchQuery, setSearchQuery] = useState("");
   const [includeFilter, setIncludeFilter] = useState<IncludeFilter>("all");
   const [recentOrderFilter, setRecentOrderFilter] =
     useState<RecentOrderFilter>("all");
 
-  // ★ 수정2: 여유 버퍼
+  // 여유 버퍼
   const [bufferQty, setBufferQty] = useState(0);
 
-  // ★ 수정3: 확정 버튼 중복 클릭 방지
+  // 확정 버튼 중복 클릭 방지
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 완료된 forecasts
@@ -113,24 +117,46 @@ export default function ForecastNewPage() {
       .catch(() => toast.error("상품 목록을 불러오지 못했습니다."));
   }, []);
 
-  // ★ 수정1: 필터링된 미주문 고객사 목록
+  // 필터링된 미주문 고객사 목록
   const filteredUnorderedRows = unorderedRows.filter((row) => {
-    // 고객사명 검색
     if (
       searchQuery &&
       !row.고객사명.toLowerCase().includes(searchQuery.toLowerCase())
-    ) {
+    )
       return false;
-    }
-    // 포함/미포함 필터
     if (includeFilter === "included" && !row.is_included) return false;
     if (includeFilter === "excluded" && row.is_included) return false;
-    // 최근 주문 필터
     if (recentOrderFilter === "has" && !row.해당요일_최근주문일자) return false;
     if (recentOrderFilter === "none" && row.해당요일_최근주문일자) return false;
-
     return true;
   });
+
+  // 주문 확정 — 조건충족/조건불충족 분리
+  const conditionMetRows = orderRows.filter(
+    (r) => r.조건충족여부 === "조건충족"
+  );
+  const conditionNotMetRows = orderRows.filter(
+    (r) => r.조건충족여부 !== "조건충족"
+  );
+
+  // ★ 수량 계산 — 조건불충족 변동분은 추가 예상에 반영
+  // 확정 수량 = 모든 주문 고객사의 "원본" 상품수량 합계 (변동 없음)
+  const confirmedQty = orderRows.reduce(
+    (s, r) => s + (Number(r.상품수량) || 0),
+    0
+  );
+  // 미주문 고객사 추가 예상
+  const unorderedAdditionalQty = unorderedRows
+    .filter((r) => r.is_included)
+    .reduce((s, r) => s + Number(r.adjusted_qty || 0), 0);
+  // 조건불충족 변동분 = (조정값 - 원본) 합계
+  const conditionNotMetDelta = conditionNotMetRows.reduce(
+    (s, r) => s + (r.adjusted_qty - (Number(r.상품수량) || 0)),
+    0
+  );
+  // 추가 예상 = 미주문 + 조건불충족 변동분
+  const additionalQty = unorderedAdditionalQty + conditionNotMetDelta;
+  const totalForecastQty = confirmedQty + additionalQty + bufferQty;
 
   // ===== STEP 1: 대상 지정 =====
   const addTarget = () => {
@@ -171,7 +197,6 @@ export default function ForecastNewPage() {
   // ===== STEP 2: 산출 =====
   const loadOrderData = useCallback(async (target: ForecastTarget) => {
     setStep2Loading(true);
-    // 필터/검색 초기화
     setSearchQuery("");
     setIncludeFilter("all");
     setRecentOrderFilter("all");
@@ -191,7 +216,11 @@ export default function ForecastNewPage() {
       const orders: OrderSummaryRow[] = await ordersRes.json();
       const unordered: UnorderedAccountRow[] = await unorderedRes.json();
 
-      setOrderRows(orders);
+      const ordersWithAdjust: OrderRow[] = orders.map((row) => ({
+        ...row,
+        adjusted_qty: Number(row.상품수량) || 0,
+      }));
+      setOrderRows(ordersWithAdjust);
 
       const withDefaults: UnorderedRow[] = unordered.map((row) => ({
         ...row,
@@ -201,20 +230,20 @@ export default function ForecastNewPage() {
       setUnorderedRows(withDefaults);
 
       const totalOrderQty = orders.reduce(
-        (s: number, r: OrderSummaryRow) => s + Number(r.상품수량 || 0),
+        (s, r) => s + (Number(r.상품수량) || 0),
         0
       );
       const orderedAccountCount = orders.length;
       const unorderedAccountCount = unordered.length;
       const orderDayAccountCount = unordered.filter(
-        (r: UnorderedAccountRow) => r.주문요일_해당여부 === "포함"
+        (r) => r.주문요일_해당여부 === "포함"
       ).length;
-      const conditionNotMetRows = orders.filter(
-        (r: OrderSummaryRow) => r.조건충족여부 === "조건불충족"
+      const conditionNotMetFiltered = orders.filter(
+        (r) => r.조건충족여부 === "조건불충족"
       );
-      const conditionNotMetCount = conditionNotMetRows.length;
-      const conditionNotMetQty = conditionNotMetRows.reduce(
-        (s: number, r: OrderSummaryRow) => s + Number(r.상품수량 || 0),
+      const conditionNotMetCount = conditionNotMetFiltered.length;
+      const conditionNotMetQty = conditionNotMetFiltered.reduce(
+        (s, r) => s + (Number(r.상품수량) || 0),
         0
       );
 
@@ -260,16 +289,19 @@ export default function ForecastNewPage() {
     );
   };
 
-  // ★ 수정2: 합계에 여유 버퍼 포함
-  const additionalQty = unorderedRows
-    .filter((r) => r.is_included)
-    .reduce((s, r) => s + Number(r.adjusted_qty || 0), 0);
-  const confirmedQty = Number(summary?.totalOrderQty || 0);
-  const totalForecastQty = confirmedQty + additionalQty + bufferQty;
+  const updateOrderAdjustedQty = (accountId: number, qty: number) => {
+    setOrderRows((prev) =>
+      prev.map((r) =>
+        r.account_id === accountId && r.조건충족여부 !== "조건충족"
+          ? { ...r, adjusted_qty: qty }
+          : r
+      )
+    );
+  };
 
-  // ★ 수정3: 확정 — 중복 클릭 방지
+  // 확정
   const confirmForecast = async () => {
-    if (isSubmitting) return; // 이미 제출 중이면 무시
+    if (isSubmitting) return;
     setIsSubmitting(true);
 
     const target = targets[currentTargetIndex];
@@ -295,6 +327,30 @@ export default function ForecastNewPage() {
       },
     }));
 
+    const conditionNotMetDetails = conditionNotMetRows.map((r) => ({
+      account_id: r.account_id,
+      account_name: r.고객사명,
+      is_included: true,
+      default_qty: Number(r.상품수량) || 0,
+      adjusted_qty: r.adjusted_qty,
+      reference_data: {
+        type: "condition_not_met",
+        주문채널: r.주문채널,
+        원본_상품수량: r.상품수량,
+        총주문수량: r.총주문수량,
+        ref_전체_평균: r.ref_전체_평균,
+        ref_전체_중간값: r.ref_전체_중간값,
+        ref_상품_전체_평균: r.ref_상품_전체_평균,
+        ref_상품_전체_중간값: r.ref_상품_전체_중간값,
+        ref_요일별_평균: r.ref_요일별_평균,
+        ref_요일별_중간값: r.ref_요일별_중간값,
+        ref_상품_요일별_평균: r.ref_상품_요일별_평균,
+        ref_상품_요일별_중간값: r.ref_상품_요일별_중간값,
+      },
+    }));
+
+    const allDetails = [...conditionNotMetDetails, ...details];
+
     try {
       const res = await fetch("/api/forecasts", {
         method: "POST",
@@ -306,7 +362,7 @@ export default function ForecastNewPage() {
           additional_forecast_qty: additionalQty,
           buffer_qty: bufferQty,
           forecast_qty: totalForecastQty,
-          details,
+          details: allDetails,
         }),
       });
 
@@ -544,7 +600,7 @@ export default function ForecastNewPage() {
                   <Card>
                     <CardContent className="pt-6">
                       <div className="text-2xl font-bold">
-                        {summary.totalOrderQty}
+                        {confirmedQty}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         주문 확정 수량
@@ -576,142 +632,90 @@ export default function ForecastNewPage() {
                 </div>
               )}
 
-              {/* 주문 확정 고객사 테이블 */}
+              {/* 주문 확정 고객사 — 조건충족 */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    주문 확정 고객사 ({orderRows.length}개사)
+                    주문 확정 — 조건충족 ({conditionMetRows.length}개사)
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="max-h-64 overflow-y-auto">
-                    <Table>
+                  <div className="max-h-64 overflow-auto">
+                    <Table containerClassName="overflow-visible">
                       <TableHeader>
                         <TableRow>
                           <TableHead>고객사명</TableHead>
                           <TableHead>채널</TableHead>
-                          <TableHead>조건</TableHead>
-                          <TableHead className="text-right">
-                            상품수량
-                          </TableHead>
+                          <TableHead className="text-right">상품수량</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {orderRows.map((row, idx) => (
+                        {conditionMetRows.map((row, idx) => (
                           <TableRow key={idx}>
                             <TableCell>{row.고객사명}</TableCell>
                             <TableCell>
                               <Badge variant="outline">{row.주문채널}</Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={
-                                  row.조건충족여부 === "조건충족"
-                                    ? "default"
-                                    : "destructive"
-                                }
-                              >
-                                {row.조건충족여부}
-                              </Badge>
                             </TableCell>
                             <TableCell className="text-right">
                               {row.상품수량}
                             </TableCell>
                           </TableRow>
                         ))}
+                        {conditionMetRows.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={3} className="text-center py-6">
+                              <p className="text-muted-foreground text-sm">
+                                조건충족 고객사가 없습니다.
+                              </p>
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </TableBody>
                     </Table>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* ★ 수정1: 미주문 고객사 — 검색/필터 추가 */}
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">
-                      미주문 고객사 ({unorderedRows.length}개사) — 수량 반영
-                    </CardTitle>
-                    <span className="text-sm text-muted-foreground">
-                      표시: {filteredUnorderedRows.length}개사
-                    </span>
-                  </div>
-                  {/* 검색 + 필터 바 */}
-                  <div className="flex flex-wrap items-center gap-3 pt-2">
-                    {/* 고객사 검색 */}
-                    <div className="relative flex-1 min-w-[200px] max-w-[300px]">
-                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder="고객사명 검색..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-8 h-9"
-                      />
-                    </div>
-                    {/* 포함/미포함 필터 */}
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-muted-foreground mr-1">
-                        포함:
-                      </span>
-                      {(
-                        [
-                          ["all", "전체"],
-                          ["included", "포함"],
-                          ["excluded", "미포함"],
-                        ] as const
-                      ).map(([val, label]) => (
+              {/* 주문 확정 — 조건불충족 */}
+              {conditionNotMetRows.length > 0 && (
+                <Card className="border-destructive/30">
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base text-destructive">
+                        주문 확정 — 조건불충족 ({conditionNotMetRows.length}
+                        개사)
+                      </CardTitle>
+                      {conditionNotMetDelta !== 0 && (
                         <Badge
-                          key={val}
                           variant={
-                            includeFilter === val ? "default" : "outline"
+                            conditionNotMetDelta > 0
+                              ? "default"
+                              : "destructive"
                           }
-                          className="cursor-pointer text-xs"
-                          onClick={() => setIncludeFilter(val)}
                         >
-                          {label}
+                          변동: {conditionNotMetDelta > 0 ? "+" : ""}
+                          {conditionNotMetDelta}
                         </Badge>
-                      ))}
+                      )}
                     </div>
-                    {/* 최근 주문 필터 */}
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-muted-foreground mr-1">
-                        최근주문:
-                      </span>
-                      {(
-                        [
-                          ["all", "전체"],
-                          ["has", "있음"],
-                          ["none", "없음"],
-                        ] as const
-                      ).map(([val, label]) => (
-                        <Badge
-                          key={val}
-                          variant={
-                            recentOrderFilter === val ? "default" : "outline"
-                          }
-                          className="cursor-pointer text-xs"
-                          onClick={() => setRecentOrderFilter(val)}
-                        >
-                          {label}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <div className="max-h-[500px] overflow-y-auto">
-                      <Table>
+                    <p className="text-xs text-muted-foreground">
+                      수량 조정 시 변동분이 추가 예상에 반영됩니다. (원본
+                      상품수량은 확정 수량에 그대로 유지)
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="max-h-[400px] overflow-auto">
+                      <Table containerClassName="overflow-visible">
                         <TableHeader>
                           <TableRow>
-                            <TableHead className="w-12 sticky left-0 bg-white z-10">
-                              포함
-                            </TableHead>
-                            <TableHead className="sticky left-12 bg-white z-10 min-w-[120px]">
+                            <TableHead className="sticky left-0 bg-background z-30 min-w-[120px]">
                               고객사명
                             </TableHead>
-                            <TableHead className="text-center min-w-[52px]">
-                              해당
+                            <TableHead>채널</TableHead>
+                            <TableHead className="text-right min-w-[64px]">
+                              원본
+                              <br />
+                              상품수량
                             </TableHead>
                             <TableHead className="text-right min-w-[64px]">
                               전체
@@ -753,121 +757,331 @@ export default function ForecastNewPage() {
                               <br />
                               요일중간
                             </TableHead>
-                            <TableHead className="text-right min-w-[80px]">
-                              최근 주문
+                            <TableHead className="text-right min-w-[56px]">
+                              변동
                             </TableHead>
-                            <TableHead className="text-right min-w-[48px]">
-                              주문
-                              <br />
-                              횟수
-                            </TableHead>
-                            <TableHead className="text-right min-w-[88px] sticky right-0 bg-white z-10">
+                            <TableHead className="text-right min-w-[88px] sticky right-0 bg-background z-30">
                               반영 수량
                             </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filteredUnorderedRows.map((row) => (
-                            <TableRow
-                              key={row.account_id}
-                              className={
-                                row.is_included ? "" : "opacity-40"
-                              }
-                            >
-                              <TableCell className="sticky left-0 bg-white z-10">
-                                <Checkbox
-                                  checked={row.is_included}
-                                  onCheckedChange={() =>
-                                    toggleIncluded(row.account_id)
-                                  }
-                                />
-                              </TableCell>
-                              <TableCell className="font-medium sticky left-12 bg-white z-10">
-                                {row.고객사명}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <Badge
-                                  variant={
-                                    row.주문요일_해당여부 === "포함"
-                                      ? "default"
-                                      : "secondary"
-                                  }
-                                  className="text-xs"
-                                >
-                                  {row.주문요일_해당여부}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">
-                                {row.전체_평균}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">
-                                {row.전체_중간값}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">
-                                {row.상품_전체_평균}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">
-                                {row.상품_전체_중간값}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">
-                                {row.요일별_평균}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">
-                                {row.요일별_중간값}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums font-semibold">
-                                {row.상품_요일별_평균}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums font-semibold">
-                                {row.상품_요일별_중간값}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">
-                                {row.해당요일_최근주문일자 || "-"}
-                              </TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">
-                                {row.해당요일_주문횟수}
-                              </TableCell>
-                              <TableCell className="text-right sticky right-0 bg-white z-10">
-                                <Input
-                                  type="number"
-                                  className="w-20 text-right h-8 text-sm"
-                                  value={row.adjusted_qty}
-                                  onChange={(e) =>
-                                    updateAdjustedQty(
-                                      row.account_id,
-                                      parseInt(e.target.value) || 0
-                                    )
-                                  }
-                                  disabled={!row.is_included}
-                                  min={0}
-                                />
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                          {filteredUnorderedRows.length === 0 && (
-                            <TableRow>
-                              <TableCell
-                                colSpan={14}
-                                className="text-center py-6"
-                              >
-                                <p className="text-muted-foreground text-sm">
-                                  {searchQuery ||
-                                  includeFilter !== "all" ||
-                                  recentOrderFilter !== "all"
-                                    ? "필터 조건에 맞는 고객사가 없습니다."
-                                    : "미주문 고객사가 없습니다."}
-                                </p>
-                              </TableCell>
-                            </TableRow>
-                          )}
+                          {conditionNotMetRows.map((row) => {
+                            const delta =
+                              row.adjusted_qty -
+                              (Number(row.상품수량) || 0);
+                            return (
+                              <TableRow key={row.account_id}>
+                                <TableCell className="font-medium sticky left-0 bg-background z-10">
+                                  {row.고객사명}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">
+                                    {row.주문채널}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums">
+                                  {row.상품수량}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums">
+                                  {row.ref_전체_평균}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums">
+                                  {row.ref_전체_중간값}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums">
+                                  {row.ref_상품_전체_평균}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums">
+                                  {row.ref_상품_전체_중간값}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums">
+                                  {row.ref_요일별_평균}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums">
+                                  {row.ref_요일별_중간값}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums font-semibold">
+                                  {row.ref_상품_요일별_평균}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums font-semibold">
+                                  {row.ref_상품_요일별_중간값}
+                                </TableCell>
+                                <TableCell className="text-right text-xs tabular-nums">
+                                  {delta !== 0 && (
+                                    <span
+                                      className={
+                                        delta > 0
+                                          ? "text-blue-600 font-medium"
+                                          : "text-destructive font-medium"
+                                      }
+                                    >
+                                      {delta > 0 ? "+" : ""}
+                                      {delta}
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right sticky right-0 bg-background z-10">
+                                  <Input
+                                    type="number"
+                                    className="w-20 text-right h-8 text-sm"
+                                    value={row.adjusted_qty}
+                                    onChange={(e) =>
+                                      updateOrderAdjustedQty(
+                                        row.account_id,
+                                        parseInt(e.target.value) || 0
+                                      )
+                                    }
+                                    min={0}
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* 미주문 고객사 — 검색/필터 */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">
+                      미주문 고객사 ({unorderedRows.length}개사) — 수량 반영
+                    </CardTitle>
+                    <span className="text-sm text-muted-foreground">
+                      표시: {filteredUnorderedRows.length}개사
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                    <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="고객사명 검색..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-8 h-9"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground mr-1">
+                        포함:
+                      </span>
+                      {(
+                        [
+                          ["all", "전체"],
+                          ["included", "포함"],
+                          ["excluded", "미포함"],
+                        ] as const
+                      ).map(([val, label]) => (
+                        <Badge
+                          key={val}
+                          variant={
+                            includeFilter === val ? "default" : "outline"
+                          }
+                          className="cursor-pointer text-xs"
+                          onClick={() => setIncludeFilter(val)}
+                        >
+                          {label}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground mr-1">
+                        최근주문:
+                      </span>
+                      {(
+                        [
+                          ["all", "전체"],
+                          ["has", "있음"],
+                          ["none", "없음"],
+                        ] as const
+                      ).map(([val, label]) => (
+                        <Badge
+                          key={val}
+                          variant={
+                            recentOrderFilter === val ? "default" : "outline"
+                          }
+                          className="cursor-pointer text-xs"
+                          onClick={() => setRecentOrderFilter(val)}
+                        >
+                          {label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="max-h-[500px] overflow-auto">
+                    <Table containerClassName="overflow-visible">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12 sticky left-0 bg-background z-30">
+                            포함
+                          </TableHead>
+                          <TableHead className="sticky left-12 bg-background z-30 min-w-[120px]">
+                            고객사명
+                          </TableHead>
+                          <TableHead className="text-center min-w-[52px]">
+                            해당
+                          </TableHead>
+                          <TableHead className="text-right min-w-[64px]">
+                            전체
+                            <br />
+                            평균
+                          </TableHead>
+                          <TableHead className="text-right min-w-[64px]">
+                            전체
+                            <br />
+                            중간값
+                          </TableHead>
+                          <TableHead className="text-right min-w-[64px]">
+                            상품
+                            <br />
+                            전체평균
+                          </TableHead>
+                          <TableHead className="text-right min-w-[64px]">
+                            상품
+                            <br />
+                            전체중간
+                          </TableHead>
+                          <TableHead className="text-right min-w-[64px]">
+                            요일
+                            <br />
+                            평균
+                          </TableHead>
+                          <TableHead className="text-right min-w-[64px]">
+                            요일
+                            <br />
+                            중간값
+                          </TableHead>
+                          <TableHead className="text-right min-w-[64px]">
+                            상품
+                            <br />
+                            요일평균
+                          </TableHead>
+                          <TableHead className="text-right min-w-[64px]">
+                            상품
+                            <br />
+                            요일중간
+                          </TableHead>
+                          <TableHead className="text-right min-w-[80px]">
+                            최근 주문
+                          </TableHead>
+                          <TableHead className="text-right min-w-[48px]">
+                            주문
+                            <br />
+                            횟수
+                          </TableHead>
+                          <TableHead className="text-right min-w-[88px] sticky right-0 bg-background z-30">
+                            반영 수량
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredUnorderedRows.map((row) => (
+                          <TableRow
+                            key={row.account_id}
+                            className={
+                              row.is_included ? "" : "opacity-40"
+                            }
+                          >
+                            <TableCell className="sticky left-0 bg-background z-10">
+                              <Checkbox
+                                checked={row.is_included}
+                                onCheckedChange={() =>
+                                  toggleIncluded(row.account_id)
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className="font-medium sticky left-12 bg-background z-10">
+                              {row.고객사명}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Badge
+                                variant={
+                                  row.주문요일_해당여부 === "포함"
+                                    ? "default"
+                                    : "secondary"
+                                }
+                                className="text-xs"
+                              >
+                                {row.주문요일_해당여부}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {row.전체_평균}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {row.전체_중간값}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {row.상품_전체_평균}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {row.상품_전체_중간값}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {row.요일별_평균}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {row.요일별_중간값}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums font-semibold">
+                              {row.상품_요일별_평균}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums font-semibold">
+                              {row.상품_요일별_중간값}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {row.해당요일_최근주문일자 || "-"}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {row.해당요일_주문횟수}
+                            </TableCell>
+                            <TableCell className="text-right sticky right-0 bg-background z-10">
+                              <Input
+                                type="number"
+                                className="w-20 text-right h-8 text-sm"
+                                value={row.adjusted_qty}
+                                onChange={(e) =>
+                                  updateAdjustedQty(
+                                    row.account_id,
+                                    parseInt(e.target.value) || 0
+                                  )
+                                }
+                                disabled={!row.is_included}
+                                min={0}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {filteredUnorderedRows.length === 0 && (
+                          <TableRow>
+                            <TableCell
+                              colSpan={14}
+                              className="text-center py-6"
+                            >
+                              <p className="text-muted-foreground text-sm">
+                                {searchQuery ||
+                                includeFilter !== "all" ||
+                                recentOrderFilter !== "all"
+                                  ? "필터 조건에 맞는 고객사가 없습니다."
+                                  : "미주문 고객사가 없습니다."}
+                              </p>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* ★ 수정2: 합계 및 확정 — 여유 버퍼 포함 */}
+              {/* 합계 및 확정 */}
               <Card>
                 <CardContent className="pt-6">
                   <div className="space-y-3">
@@ -878,7 +1092,24 @@ export default function ForecastNewPage() {
                       </span>
                       <span>
                         + 추가 예상:{" "}
-                        <strong>{additionalQty}</strong>
+                        <strong
+                          className={
+                            conditionNotMetDelta < 0
+                              ? "text-destructive"
+                              : ""
+                          }
+                        >
+                          {additionalQty}
+                        </strong>
+                        {conditionNotMetDelta !== 0 && (
+                          <span className="text-xs text-muted-foreground ml-1">
+                            (미주문 {unorderedAdditionalQty}
+                            {conditionNotMetDelta >= 0 ? " + " : " "}
+                            조건불충족{" "}
+                            {conditionNotMetDelta > 0 ? "+" : ""}
+                            {conditionNotMetDelta})
+                          </span>
+                        )}
                       </span>
                       <span className="flex items-center gap-1.5">
                         + 여유분:
@@ -905,7 +1136,6 @@ export default function ForecastNewPage() {
                         * 여유분 {bufferQty}개가 최종 수량에 포함됩니다.
                       </p>
                     )}
-                    {/* ★ 수정3: 확정 버튼 — disabled 처리 */}
                     <div className="flex justify-end">
                       <Button
                         onClick={confirmForecast}

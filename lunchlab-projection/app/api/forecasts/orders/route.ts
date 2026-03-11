@@ -40,7 +40,6 @@ export async function GET(request: NextRequest) {
     .filter((m) => m.channel === "app")
     .map((m) => m.external_id);
 
-  // ★ CAST AS SIGNED 로 감싸서 숫자 타입 보장
   const webCaseExpr =
     webIds.length > 0
       ? `CAST(SUM(CASE WHEN od.product_id IN (${webIds.join(",")}) THEN od.quantity ELSE 0 END) AS SIGNED)`
@@ -55,10 +54,15 @@ export async function GET(request: NextRequest) {
       ? `CAST(${appCaseExprs.join(" + ")} AS SIGNED)`
       : "0";
 
-  // trial_orders 내부에서도 od → od2 alias 를 쓰므로 별도 생성
   const webCaseExprTrial =
     webIds.length > 0
       ? `CAST(SUM(CASE WHEN od2.product_id IN (${webIds.join(",")}) THEN od2.quantity ELSE 0 END) AS SIGNED)`
+      : "0";
+
+  // ★ 기준 데이터 산출용 product_id case 표현식 (ref_orders CTE에서 사용)
+  const refProductCaseExpr =
+    webIds.length > 0
+      ? `CAST(SUM(CASE WHEN rod.product_id IN (${webIds.join(",")}) THEN rod.quantity ELSE 0 END) AS SIGNED)`
       : "0";
 
   const sql = `
@@ -148,29 +152,140 @@ export async function GET(request: NextRequest) {
         FROM app_orders ap
         LEFT JOIN web_orders w ON w.account_id = ap.account_id
         WHERE w.account_id IS NULL
+    ),
+    all_ordered AS (
+        SELECT account_id, account_name AS 고객사명, 주문채널, 조건충족여부,
+               CAST(상품수량 AS SIGNED) AS 상품수량,
+               CAST(총주문수량 AS SIGNED) AS 총주문수량
+        FROM regular_combined
+        UNION ALL
+        SELECT t.account_id, t.account_name, '체험', '조건충족',
+               CAST(t.상품수량 AS SIGNED),
+               CAST(t.총주문수량 AS SIGNED)
+        FROM trial_orders t
+        WHERE t.account_status = 'considering'
+    ),
+    -- ★ 조건불충족 고객사의 과거 주문 기준 데이터 산출
+    ref_orders AS (
+        SELECT
+            o.account_id,
+            o.delivery_date,
+            DAYOFWEEK(o.delivery_date) AS dow,
+            CAST(SUM(rod.quantity) AS SIGNED) AS daily_qty,
+            ${refProductCaseExpr} AS product_qty
+        FROM orders o
+        JOIN \`order-details\` rod ON rod.order_id = o.id
+        WHERE o.deleted_at IS NULL
+          AND rod.deleted_at IS NULL
+          AND o.delivery_date >= '2025-09-01'
+          AND o.delivery_date < ?
+          AND o.account_id IN (
+              SELECT account_id FROM all_ordered WHERE 조건충족여부 = '조건불충족'
+          )
+        GROUP BY o.account_id, o.delivery_date
+    ),
+    ref_overall AS (
+        SELECT account_id,
+               ROUND(AVG(daily_qty),1) AS ref_전체_평균,
+               ROUND(AVG(product_qty),1) AS ref_상품_전체_평균
+        FROM ref_orders
+        GROUP BY account_id
+    ),
+    ref_overall_ranked AS (
+        SELECT account_id, daily_qty, product_qty,
+               ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY daily_qty) AS rn_total,
+               ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY product_qty) AS rn_product,
+               COUNT(*) OVER (PARTITION BY account_id) AS cnt
+        FROM ref_orders
+    ),
+    ref_overall_median AS (
+        SELECT account_id, ROUND(AVG(daily_qty),1) AS ref_전체_중간값
+        FROM ref_overall_ranked
+        WHERE rn_total IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
+        GROUP BY account_id
+    ),
+    ref_overall_median_product AS (
+        SELECT account_id, ROUND(AVG(product_qty),1) AS ref_상품_전체_중간값
+        FROM ref_overall_ranked
+        WHERE rn_product IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
+        GROUP BY account_id
+    ),
+    ref_dow AS (
+        SELECT account_id,
+               ROUND(AVG(daily_qty),1) AS ref_요일별_평균,
+               ROUND(AVG(product_qty),1) AS ref_상품_요일별_평균
+        FROM ref_orders
+        WHERE dow = DAYOFWEEK(?)
+        GROUP BY account_id
+    ),
+    ref_dow_ranked AS (
+        SELECT account_id, daily_qty, product_qty,
+               ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY daily_qty) AS rn_total,
+               ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY product_qty) AS rn_product,
+               COUNT(*) OVER (PARTITION BY account_id) AS cnt
+        FROM ref_orders
+        WHERE dow = DAYOFWEEK(?)
+    ),
+    ref_dow_median AS (
+        SELECT account_id, ROUND(AVG(daily_qty),1) AS ref_요일별_중간값
+        FROM ref_dow_ranked
+        WHERE rn_total IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
+        GROUP BY account_id
+    ),
+    ref_dow_median_product AS (
+        SELECT account_id, ROUND(AVG(product_qty),1) AS ref_상품_요일별_중간값
+        FROM ref_dow_ranked
+        WHERE rn_product IN (FLOOR((cnt+1)/2), CEIL((cnt+1)/2))
+        GROUP BY account_id
     )
-    SELECT account_id, account_name AS 고객사명, 주문채널, 조건충족여부,
-           CAST(상품수량 AS SIGNED) AS 상품수량,
-           CAST(총주문수량 AS SIGNED) AS 총주문수량
-    FROM regular_combined
-    UNION ALL
-    SELECT t.account_id, t.account_name, '체험', '조건충족',
-           CAST(t.상품수량 AS SIGNED),
-           CAST(t.총주문수량 AS SIGNED)
-    FROM trial_orders t
-    WHERE t.account_status = 'considering'
-    ORDER BY 주문채널, 고객사명
+    SELECT
+        ao.account_id,
+        ao.고객사명,
+        ao.주문채널,
+        ao.조건충족여부,
+        ao.상품수량,
+        ao.총주문수량,
+        COALESCE(ro.ref_전체_평균, 0)            AS ref_전체_평균,
+        COALESCE(rom.ref_전체_중간값, 0)         AS ref_전체_중간값,
+        COALESCE(ro.ref_상품_전체_평균, 0)       AS ref_상품_전체_평균,
+        COALESCE(romp.ref_상품_전체_중간값, 0)   AS ref_상품_전체_중간값,
+        COALESCE(rd.ref_요일별_평균, 0)          AS ref_요일별_평균,
+        COALESCE(rdm.ref_요일별_중간값, 0)       AS ref_요일별_중간값,
+        COALESCE(rd.ref_상품_요일별_평균, 0)     AS ref_상품_요일별_평균,
+        COALESCE(rdmp.ref_상품_요일별_중간값, 0) AS ref_상품_요일별_중간값
+    FROM all_ordered ao
+    LEFT JOIN ref_overall ro                   ON ro.account_id = ao.account_id
+    LEFT JOIN ref_overall_median rom           ON rom.account_id = ao.account_id
+    LEFT JOIN ref_overall_median_product romp  ON romp.account_id = ao.account_id
+    LEFT JOIN ref_dow rd                       ON rd.account_id = ao.account_id
+    LEFT JOIN ref_dow_median rdm               ON rdm.account_id = ao.account_id
+    LEFT JOIN ref_dow_median_product rdmp      ON rdmp.account_id = ao.account_id
+    ORDER BY
+      CASE ao.조건충족여부 WHEN '조건충족' THEN 0 ELSE 1 END,
+      ao.주문채널,
+      ao.고객사명
   `;
 
   try {
-    const rows = await queryMySQL(sql, [date, date, date, date]);
+    const rows = await queryMySQL(sql, [
+      date, date, date, date,   // trial_orders, trial_order_ids, web_orders, app_orders
+      date,                     // ref_orders: delivery_date < ?
+      date, date,               // ref_dow, ref_dow_ranked: DAYOFWEEK(?)
+    ]);
 
-    // ★ JS 쪽에서도 숫자 변환 보장 (이중 안전장치)
     const parsed = (rows as Record<string, unknown>[]).map((row) => ({
       ...row,
       상품수량: Number(row["상품수량"]) || 0,
       총주문수량: Number(row["총주문수량"]) || 0,
       account_id: Number(row["account_id"]) || 0,
+      ref_전체_평균: Number(row["ref_전체_평균"]) || 0,
+      ref_전체_중간값: Number(row["ref_전체_중간값"]) || 0,
+      ref_상품_전체_평균: Number(row["ref_상품_전체_평균"]) || 0,
+      ref_상품_전체_중간값: Number(row["ref_상품_전체_중간값"]) || 0,
+      ref_요일별_평균: Number(row["ref_요일별_평균"]) || 0,
+      ref_요일별_중간값: Number(row["ref_요일별_중간값"]) || 0,
+      ref_상품_요일별_평균: Number(row["ref_상품_요일별_평균"]) || 0,
+      ref_상품_요일별_중간값: Number(row["ref_상품_요일별_중간값"]) || 0,
     }));
 
     return NextResponse.json(parsed);
