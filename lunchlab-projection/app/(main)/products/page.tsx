@@ -205,7 +205,7 @@ export default function ProductsPage() {
                   min={1}
                 />
                 <p className="text-xs text-muted-foreground">
-                  산출일 기준 N일 후가 발주일이 됩니다
+                  산출일 기준 N일 후가 출고일이 됩니다
                 </p>
               </div>
               <div className="space-y-2">
@@ -222,6 +222,9 @@ export default function ProductsPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>상품 ID 매핑</Label>
+                  <p className="text-xs text-muted-foreground">
+                    비즈옵스팀에 문의해주세요 (수정 금지)
+                  </p>
                   <Button variant="outline" size="sm" onClick={addMapping}>
                     <Plus className="mr-1 h-3 w-3" />
                     추가

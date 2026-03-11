@@ -212,7 +212,7 @@ export default function ForecastListPage() {
         <CardContent className="pt-6">
           <div className="flex flex-wrap items-end gap-4">
             <div className="space-y-1">
-              <Label>발주일 (시작)</Label>
+              <Label>출고일 (시작)</Label>
               <Input
                 type="date"
                 value={dateFrom}
@@ -221,7 +221,7 @@ export default function ForecastListPage() {
               />
             </div>
             <div className="space-y-1">
-              <Label>발주일 (종료)</Label>
+              <Label>출고일 (종료)</Label>
               <Input
                 type="date"
                 value={dateTo}
@@ -266,7 +266,7 @@ export default function ForecastListPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>발주일</TableHead>
+                  <TableHead>출고일</TableHead>
                   <TableHead>상품</TableHead>
                   <TableHead className="text-right">주문확정</TableHead>
                   <TableHead className="text-right">추가예상</TableHead>
