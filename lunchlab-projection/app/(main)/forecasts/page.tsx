@@ -149,7 +149,7 @@ export default function ForecastListPage() {
     }
   };
 
-  // 수량 조정 (프레시밀 D+3 등)
+  // 수량 조정
   const openAdjustDialog = (forecast: OrderForecast) => {
     setAdjustTarget(forecast);
     setAdjustQty(forecast.forecast_qty);
@@ -252,7 +252,7 @@ export default function ForecastListPage() {
         </CardContent>
       </Card>
 
-      {/* 목록 */}
+      {/* 목록 — ★ 수정2: 여유분 컬럼 추가 */}
       <Card>
         <CardHeader>
           <CardTitle>산출 결과</CardTitle>
@@ -270,6 +270,7 @@ export default function ForecastListPage() {
                   <TableHead>상품</TableHead>
                   <TableHead className="text-right">주문확정</TableHead>
                   <TableHead className="text-right">추가예상</TableHead>
+                  <TableHead className="text-right">여유분</TableHead>
                   <TableHead className="text-right">예상수량</TableHead>
                   <TableHead className="text-right">확정수량</TableHead>
                   <TableHead className="text-right">오차율</TableHead>
@@ -288,6 +289,15 @@ export default function ForecastListPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {f.additional_forecast_qty}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {f.buffer_qty != null && f.buffer_qty > 0 ? (
+                        <Badge variant="outline" className="text-xs">
+                          +{f.buffer_qty}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-semibold">
                       {f.forecast_qty}
@@ -343,7 +353,7 @@ export default function ForecastListPage() {
                 ))}
                 {forecasts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8">
+                    <TableCell colSpan={9} className="text-center py-8">
                       <p className="text-muted-foreground">
                         산출된 결과가 없습니다
                       </p>
