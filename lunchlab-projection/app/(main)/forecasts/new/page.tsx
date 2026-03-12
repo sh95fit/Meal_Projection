@@ -88,6 +88,7 @@ export default function ForecastNewPage() {
 
   // 여유 버퍼
   const [bufferQty, setBufferQty] = useState(0);
+  const [bufferInput, setBufferInput] = useState("0");
 
   // 확정 버튼 중복 클릭 방지
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -194,6 +195,7 @@ export default function ForecastNewPage() {
     setIncludeFilter("all");
     setRecentOrderFilter("all");
     setBufferQty(0);
+    setBufferInput("0");
     setIsSubmitting(false);
 
     try {
@@ -1105,15 +1107,25 @@ export default function ForecastNewPage() {
                         )}
                       </span>
                       <span className="flex items-center gap-1.5">
-                        + 여유분:
+                        + 조정 수량:
                         <Input
-                          type="number"
-                          className="w-20 h-8 text-right text-sm"
-                          value={bufferQty}
-                          onChange={(e) =>
-                            setBufferQty(parseInt(e.target.value) || 0)
-                          }
-                          min={0}
+                          type="text"
+                          inputMode="numeric"
+                          className="w-24 h-8 text-right text-sm"
+                          value={bufferInput}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            // 숫자, 마이너스 부호, 빈 문자열만 허용
+                            if (/^-?\d*$/.test(v)) {
+                              setBufferInput(v);
+                              const parsed = parseInt(v, 10);
+                              setBufferQty(isNaN(parsed) ? 0 : parsed);
+                            }
+                          }}
+                          onBlur={() => {
+                            // 포커스 아웃 시 표시 정리
+                            setBufferInput(String(bufferQty));
+                          }}
                           placeholder="0"
                         />
                       </span>
@@ -1126,7 +1138,7 @@ export default function ForecastNewPage() {
                     </div>
                     {bufferQty > 0 && (
                       <p className="text-xs text-muted-foreground">
-                        * 여유분 {bufferQty}개가 최종 수량에 포함됩니다.
+                        * 조정 수량 {bufferQty > 0 ? `+${bufferQty}` : bufferQty}개가 최종 수량에 반영됩니다.
                       </p>
                     )}
                     <div className="flex justify-end">
@@ -1180,7 +1192,7 @@ export default function ForecastNewPage() {
                     <span className="font-bold">{f.forecastQty} 개</span>
                     {f.bufferQty > 0 && (
                       <span className="text-xs text-muted-foreground ml-2">
-                        (여유분 {f.bufferQty} 포함)
+                        (조정 {f.bufferQty > 0 ? `+${f.bufferQty}` : f.bufferQty} 반영)
                       </span>
                     )}
                   </div>
@@ -1221,6 +1233,7 @@ export default function ForecastNewPage() {
                   setCompletedForecasts([]);
                   setCurrentTargetIndex(0);
                   setBufferQty(0);
+                  setBufferInput("0");
                   setIsSubmitting(false);
                 }}
               >

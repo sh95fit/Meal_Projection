@@ -269,7 +269,7 @@ export default function ForecastListPage() {
                   <TableHead>상품</TableHead>
                   <TableHead className="text-right">주문확정</TableHead>
                   <TableHead className="text-right">추가예상</TableHead>
-                  <TableHead className="text-right">여유분</TableHead>
+                  <TableHead className="text-right">조정 수량</TableHead>
                   <TableHead className="text-right">예상수량</TableHead>
                   <TableHead className="text-right">확정수량</TableHead>
                   <TableHead className="text-right">오차율</TableHead>
@@ -292,9 +292,12 @@ export default function ForecastListPage() {
                       {f.additional_forecast_qty}
                     </TableCell>
                     <TableCell className="text-right">
-                      {f.buffer_qty != null && f.buffer_qty > 0 ? (
-                        <Badge variant="outline" className="text-xs">
-                          +{f.buffer_qty}
+                      {f.buffer_qty != null && f.buffer_qty !== 0 ? (
+                        <Badge
+                          variant={f.buffer_qty > 0 ? "outline" : "destructive"}
+                          className="text-xs"
+                        >
+                          {f.buffer_qty > 0 ? `+${f.buffer_qty}` : f.buffer_qty}
                         </Badge>
                       ) : (
                         <span className="text-muted-foreground">-</span>
