@@ -24,7 +24,8 @@
     "react-dom": "19.2.3",
     "sonner": "^2.0.7",
     "ssh2": "^1.17.0",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",

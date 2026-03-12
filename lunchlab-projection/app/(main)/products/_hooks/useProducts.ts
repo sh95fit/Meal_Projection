@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
+import { useProductStore } from "@/lib/stores/useProductStore";
 import type { ProductWithMappings } from "@/types";
 
 export interface MappingInput {
@@ -10,8 +11,8 @@ export interface MappingInput {
 }
 
 export function useProducts() {
-  const [products, setProducts] = useState<ProductWithMappings[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { products, loading: storeLoading, fetchProducts, setProducts } = useProductStore();
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductWithMappings | null>(null);
 
@@ -21,18 +22,20 @@ export function useProducts() {
   const [notificationGroup, setNotificationGroup] = useState("");
   const [mappings, setMappings] = useState<MappingInput[]>([]);
 
-  const fetchProducts = useCallback(async () => {
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  // ─── CRUD 후 store 갱신 ───
+  const refreshProducts = useCallback(async () => {
     try {
       const res = await fetch("/api/products");
-      setProducts(await res.json());
+      const data = await res.json();
+      setProducts(data);
     } catch {
       toast.error("상품 목록을 불러오지 못했습니다.");
-    } finally {
-      setLoading(false);
     }
-  }, []);
-
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  }, [setProducts]);
 
   const resetForm = () => {
     setProductName("");
@@ -84,7 +87,7 @@ export function useProducts() {
       }
       setDialogOpen(false);
       resetForm();
-      fetchProducts();
+      refreshProducts();  // store 갱신
     } catch { toast.error("저장에 실패했습니다."); }
   };
 
@@ -93,12 +96,12 @@ export function useProducts() {
     try {
       await fetch(`/api/products/${id}`, { method: "DELETE" });
       toast.success("상품이 삭제되었습니다.");
-      fetchProducts();
+      refreshProducts();  // store 갱신
     } catch { toast.error("삭제에 실패했습니다."); }
   };
 
   return {
-    products, loading, dialogOpen, setDialogOpen, editingProduct,
+    products, loading: storeLoading, dialogOpen, setDialogOpen, editingProduct,
     productName, setProductName, offsetDays, setOffsetDays,
     notificationGroup, setNotificationGroup,
     mappings, addMapping, removeMapping, updateMapping,

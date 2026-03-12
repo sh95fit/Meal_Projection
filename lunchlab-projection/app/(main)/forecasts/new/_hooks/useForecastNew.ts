@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { getToday, addDays } from "@/lib/utils";
+import { useProductStore } from "@/lib/stores/useProductStore";
 import type {
   ProductWithMappings,
   ForecastTarget,
@@ -27,7 +28,9 @@ export type RecentOrderFilter = "all" | "has" | "none";
 
 export function useForecastNew() {
   const [step, setStep] = useState(1);
-  const [products, setProducts] = useState<ProductWithMappings[]>([]);
+  // zustand 미사용 시 코드
+  // const [products, setProducts] = useState<ProductWithMappings[]>([]);
+  const { products, fetchProducts } = useProductStore();
   const [targets, setTargets] = useState<ForecastTarget[]>([]);
   const [currentTargetIndex, setCurrentTargetIndex] = useState(0);
 
@@ -51,12 +54,18 @@ export function useForecastNew() {
   const [completedForecasts, setCompletedForecasts] = useState<CompletedForecast[]>([]);
 
   // ─── 상품 로드 ───
+  // zustand 미사용 시 코드
+  // useEffect(() => {
+  //   fetch("/api/products")
+  //     .then((r) => r.json())
+  //     .then(setProducts)
+  //     .catch(() => toast.error("상품 목록을 불러오지 못했습니다."));
+  // }, []);
+
   useEffect(() => {
-    fetch("/api/products")
-      .then((r) => r.json())
-      .then(setProducts)
-      .catch(() => toast.error("상품 목록을 불러오지 못했습니다."));
-  }, []);
+    fetchProducts();
+  }, [fetchProducts]);
+
 
   // ─── 파생 데이터 ───
   const filteredUnorderedRows = unorderedRows.filter((row) => {
