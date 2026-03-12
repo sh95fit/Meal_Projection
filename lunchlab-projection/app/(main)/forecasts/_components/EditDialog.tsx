@@ -25,7 +25,15 @@ export function EditDialog({ open, onOpenChange, target, qty, onQtyChange, onSub
           </p>
           <div className="space-y-2">
             <Label>수정 수량</Label>
-            <Input type="number" value={qty} onChange={(e) => onQtyChange(parseInt(e.target.value) || 0)} min={0} />
+            <Input
+              type="number"
+              value={qty}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value);
+                onQtyChange(isNaN(parsed) ? 0 : parsed);
+              }}
+              min={0}
+            />
           </div>
         </div>
         <DialogFooter>

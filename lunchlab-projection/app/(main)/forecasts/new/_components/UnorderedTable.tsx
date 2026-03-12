@@ -111,9 +111,11 @@ export function UnorderedTable({
                       type="number"
                       className="w-20 text-right h-8 text-sm"
                       value={row.adjusted_qty}
-                      onChange={(e) => onUpdateQty(row.account_id, parseInt(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const parsed = parseInt(e.target.value);
+                        onUpdateQty(row.account_id, isNaN(parsed) ? 0 : parsed);
+                      }}
                       disabled={!row.is_included}
-                      min={0}
                     />
                   </TableCell>
                 </TableRow>
