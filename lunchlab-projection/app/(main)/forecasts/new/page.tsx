@@ -32,6 +32,8 @@ import type {
   ForecastSummary,
 } from "@/types";
 
+import { formatDateWithDay } from "@/lib/utils";
+
 // ─── 유틸리티 함수 ───
 
 function getToday(): string {
@@ -50,15 +52,6 @@ function addDays(dateStr: string, days: number): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function formatDateWithDay(dateStr: string): string {
-  if (!dateStr) return "";
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
-  const dayName = dayNames[date.getDay()];
-  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}(${dayName})`;
 }
 
 // ─── 타입 ───

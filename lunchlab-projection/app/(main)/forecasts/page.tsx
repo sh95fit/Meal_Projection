@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Pencil, ClipboardCheck, Settings2 } from "lucide-react";
 import { toast } from "sonner";
+import { formatDateWithDay } from "@/lib/utils";
 import type { OrderForecast, ProductWithMappings } from "@/types";
 
 export default function ForecastListPage() {
@@ -101,7 +102,6 @@ export default function ForecastListPage() {
         body: JSON.stringify({ forecast_qty: editQty }),
       });
 
-      // 변경 알림 발송
       await fetch("/api/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -172,7 +172,6 @@ export default function ForecastListPage() {
 
       const result = await res.json();
 
-      // 조정 알림
       await fetch("/api/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -252,7 +251,7 @@ export default function ForecastListPage() {
         </CardContent>
       </Card>
 
-      {/* 목록 — ★ 수정2: 여유분 컬럼 추가 */}
+      {/* 목록 */}
       <Card>
         <CardHeader>
           <CardTitle>산출 결과</CardTitle>
@@ -280,7 +279,9 @@ export default function ForecastListPage() {
               <TableBody>
                 {forecasts.map((f) => (
                   <TableRow key={f.id}>
-                    <TableCell>{f.delivery_date}</TableCell>
+                    <TableCell>
+                      {formatDateWithDay(f.delivery_date)}
+                    </TableCell>
                     <TableCell className="font-medium">
                       {f.product_name}
                     </TableCell>
@@ -374,7 +375,8 @@ export default function ForecastListPage() {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              {editTarget?.product_name} — {editTarget?.delivery_date}
+              {editTarget?.product_name} —{" "}
+              {formatDateWithDay(editTarget?.delivery_date ?? "")}
             </p>
             <div className="space-y-2">
               <Label>수정 수량</Label>
@@ -403,7 +405,8 @@ export default function ForecastListPage() {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              {actualTarget?.product_name} — {actualTarget?.delivery_date}
+              {actualTarget?.product_name} —{" "}
+              {formatDateWithDay(actualTarget?.delivery_date ?? "")}
             </p>
             <p className="text-sm">
               예상 수량: <strong>{actualTarget?.forecast_qty}</strong>
@@ -453,7 +456,8 @@ export default function ForecastListPage() {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              {adjustTarget?.product_name} — {adjustTarget?.delivery_date}
+              {adjustTarget?.product_name} —{" "}
+              {formatDateWithDay(adjustTarget?.delivery_date ?? "")}
             </p>
             <p className="text-sm">
               현재 예상 수량: <strong>{adjustTarget?.forecast_qty}</strong>
