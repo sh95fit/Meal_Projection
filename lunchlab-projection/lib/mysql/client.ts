@@ -4,17 +4,24 @@ import fs from "fs";
 import path from "path";
 import type { Duplex } from "stream";
 
+// ─── SSH 키 로드 ───
+
 function getSSHPrivateKey(): string | Buffer {
-  // 1순위: 환경변수 (Vercel 배포 환경)
   if (process.env.SSH_PRIVATE_KEY) {
     return process.env.SSH_PRIVATE_KEY;
   }
-  // 2순위: 파일 (로컬 개발 환경)
   const keyPath = path.resolve(process.env.SSH_KEY_PATH || "test.pem");
   return fs.readFileSync(keyPath);
 }
 
-function createSSHStream(): Promise<{ stream: Duplex; ssh: SSHClient }> {
+// ─── SSH 터널 캐싱 ───
+// 모듈 레벨 변수 — 서버리스 인스턴스가 살아있는 동안 유지됨
+
+let cachedSSH: SSHClient | null = null;
+let cachedStream: Duplex | null = null;
+let sshReady = false;
+
+function createSSHTunnel(): Promise<{ stream: Duplex; ssh: SSHClient }> {
   return new Promise((resolve, reject) => {
     const ssh = new SSHClient();
 
@@ -36,6 +43,10 @@ function createSSHStream(): Promise<{ stream: Duplex; ssh: SSHClient }> {
         );
       })
       .on("error", (err) => {
+        // 캐시된 연결이 끊어졌으면 초기화
+        cachedSSH = null;
+        cachedStream = null;
+        sshReady = false;
         reject(err);
       })
       .connect({
@@ -47,41 +58,120 @@ function createSSHStream(): Promise<{ stream: Duplex; ssh: SSHClient }> {
   });
 }
 
+async function getSSHTunnel(): Promise<{ stream: Duplex; ssh: SSHClient }> {
+  // 캐시된 SSH가 살아있으면 새 포트 포워딩 스트림만 생성
+  if (cachedSSH && sshReady) {
+    try {
+      const stream = await new Promise<Duplex>((resolve, reject) => {
+        cachedSSH!.forwardOut(
+          "127.0.0.1",
+          0,
+          process.env.DB_HOST!,
+          parseInt(process.env.DB_PORT || "3306"),
+          (err, stream) => {
+            if (err) reject(err);
+            else resolve(stream);
+          }
+        );
+      });
+      return { stream, ssh: cachedSSH };
+    } catch {
+      // 캐시된 SSH가 죽었으면 새로 만듦
+      cachedSSH = null;
+      cachedStream = null;
+      sshReady = false;
+    }
+  }
+
+  // 새 SSH 터널 생성
+  const tunnel = await createSSHTunnel();
+  cachedSSH = tunnel.ssh;
+  cachedStream = tunnel.stream;
+  sshReady = true;
+
+  // SSH 연결 종료 이벤트 감지
+  tunnel.ssh.on("close", () => {
+    cachedSSH = null;
+    cachedStream = null;
+    sshReady = false;
+  });
+
+  return tunnel;
+}
+
+// ─── 직접 연결용 풀 (SSH 없는 환경) ───
+
+let directPool: mysql.Pool | null = null;
+
+function getDirectPool(): mysql.Pool {
+  if (!directPool) {
+    directPool = mysql.createPool({
+      host: process.env.DB_HOST!,
+      port: parseInt(process.env.DB_PORT || "3306"),
+      user: process.env.DB_USER!,
+      password: process.env.DB_PASSWORD!,
+      database: process.env.DB_ORDER_SERVICE || "order_service",
+      waitForConnections: true,
+      connectionLimit: 5,
+      idleTimeout: 60000,       // 60초 동안 안 쓰면 연결 해제
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000,
+    });
+  }
+  return directPool;
+}
+
+// ─── 공개 API ───
+
+const useSSH = !!(process.env.SSH_HOST && (process.env.SSH_PRIVATE_KEY || process.env.SSH_KEY_PATH));
+
 export async function queryMySQL<T = RowDataPacket>(
   sql: string,
   params?: unknown[]
 ): Promise<T[]> {
-  const useSSH = !!(process.env.SSH_HOST && (process.env.SSH_PRIVATE_KEY || process.env.SSH_KEY_PATH));
-  let connection: mysql.Connection;
-  let ssh: SSHClient | null = null;
-
   if (useSSH) {
-    const tunnel = await createSSHStream();
-    ssh = tunnel.ssh;
-    connection = await mysql.createConnection({
-      host: process.env.DB_HOST!,
-      port: parseInt(process.env.DB_PORT || "3306"),
-      user: process.env.DB_USER!,
-      password: process.env.DB_PASSWORD!,
-      database: process.env.DB_ORDER_SERVICE || "order_service",
-      stream: tunnel.stream,
-    });
+    return queryViaSSH<T>(sql, params);
   } else {
-    // SSH 없이 직접 연결 (VPC 내부 등)
-    connection = await mysql.createConnection({
-      host: process.env.DB_HOST!,
-      port: parseInt(process.env.DB_PORT || "3306"),
-      user: process.env.DB_USER!,
-      password: process.env.DB_PASSWORD!,
-      database: process.env.DB_ORDER_SERVICE || "order_service",
-    });
+    return queryDirect<T>(sql, params);
   }
+}
+
+// ─── SSH 경유 쿼리 ───
+
+async function queryViaSSH<T>(
+  sql: string,
+  params?: unknown[]
+): Promise<T[]> {
+  const tunnel = await getSSHTunnel();
+
+  // SSH 터널 위에 MySQL 연결 생성
+  // SSH 스트림은 재사용하지만 MySQL 연결은 매번 새로 만듦
+  // (SSH 스트림 위의 MySQL 연결을 풀링하면 스트림 충돌 위험)
+  const connection = await mysql.createConnection({
+    host: process.env.DB_HOST!,
+    port: parseInt(process.env.DB_PORT || "3306"),
+    user: process.env.DB_USER!,
+    password: process.env.DB_PASSWORD!,
+    database: process.env.DB_ORDER_SERVICE || "order_service",
+    stream: tunnel.stream,
+  });
 
   try {
     const [rows] = await connection.query<RowDataPacket[]>(sql, params);
     return rows as T[];
   } finally {
     await connection.end();
-    if (ssh) ssh.end();
+    // SSH는 닫지 않음 — 캐시해서 다음 쿼리에 재사용
   }
+}
+
+// ─── 직접 연결 쿼리 (풀 사용) ───
+
+async function queryDirect<T>(
+  sql: string,
+  params?: unknown[]
+): Promise<T[]> {
+  const pool = getDirectPool();
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
+  return rows as T[];
 }
