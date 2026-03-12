@@ -9,7 +9,7 @@ function buildForecastCompleteMessage(data: Record<string, unknown>): string {
   const groups = data.groups as {
     groupName: string;
     date: string;
-    items: { productName: string; qty: number }[];
+    items: { productName: string; qty: number; buffer: number }[];
     totalQty: number;
   }[];
 
@@ -21,7 +21,10 @@ function buildForecastCompleteMessage(data: Record<string, unknown>): string {
     message += `**${month}월 ${day}일 ${dayName}요일**\n\n`;
 
     for (const item of group.items) {
-      message += `${item.productName} : ${item.qty}\n\n`;
+      const bufferNote = item.buffer !== 0
+        ? ` (조정 ${item.buffer > 0 ? "+" : ""}${item.buffer})`
+        : "";
+      message += `${item.productName} : ${item.qty}${bufferNote}\n\n`;
     }
     message += `총계 : ${group.totalQty}\n\n---\n\n`;
   }
