@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
+import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useProductStore } from "@/lib/stores/useProductStore";
 import type { ProductWithMappings } from "@/types";
 
@@ -29,8 +30,7 @@ export function useProducts() {
   // ─── CRUD 후 store 갱신 ───
   const refreshProducts = useCallback(async () => {
     try {
-      const res = await fetch("/api/products");
-      const data = await res.json();
+      const data = await apiGet<ProductWithMappings[]>("/api/products");
       setProducts(data);
     } catch {
       toast.error("상품 목록을 불러오지 못했습니다.");
@@ -75,29 +75,29 @@ export function useProducts() {
 
     try {
       if (editingProduct) {
-        await fetch(`/api/products/${editingProduct.id}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-        });
+        await apiPut(`/api/products/${editingProduct.id}`, payload);
         toast.success("상품이 수정되었습니다.");
       } else {
-        await fetch("/api/products", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-        });
+        await apiPost("/api/products", payload);
         toast.success("상품이 등록되었습니다.");
       }
       setDialogOpen(false);
       resetForm();
-      refreshProducts();  // store 갱신
-    } catch { toast.error("저장에 실패했습니다."); }
+      refreshProducts();
+    } catch {
+      toast.error("저장에 실패했습니다.");
+    }
   };
 
   const handleDelete = async (id: number) => {
     if (!confirm("정말 삭제하시겠습니까?")) return;
     try {
-      await fetch(`/api/products/${id}`, { method: "DELETE" });
+      await apiDelete(`/api/products/${id}`);
       toast.success("상품이 삭제되었습니다.");
-      refreshProducts();  // store 갱신
-    } catch { toast.error("삭제에 실패했습니다."); }
+      refreshProducts();
+    } catch {
+      toast.error("삭제에 실패했습니다.");
+    }
   };
 
   return {
