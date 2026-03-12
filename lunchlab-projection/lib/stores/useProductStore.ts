@@ -1,14 +1,14 @@
 import { create } from "zustand";
+import { apiGet } from "@/lib/api";
 import type { ProductWithMappings } from "@/types";
 
 interface ProductStore {
-  products: ProductWithMappings[];  // 상품 목록 데이터
-  loading: boolean; // API 호출 중인지
-  loaded: boolean; // 한 번이라도 로드 완료했는지
-  error: string | null; // 에러 메시지
-
-  fetchProducts: () => Promise<void>; // 목록 불러오기
-  setProducts: (products: ProductWithMappings[]) => void; // 외부에서 직접 갱신
+  products: ProductWithMappings[];
+  loading: boolean;
+  loaded: boolean;
+  error: string | null;
+  fetchProducts: () => Promise<void>;
+  setProducts: (products: ProductWithMappings[]) => void;
 }
 
 export const useProductStore = create<ProductStore>((set, get) => ({
@@ -18,14 +18,10 @@ export const useProductStore = create<ProductStore>((set, get) => ({
   error: null,
 
   fetchProducts: async () => {
-    // get()으로 현재 상태를 읽어서 중복 요청 방지
     if (get().loaded || get().loading) return;
-
     set({ loading: true, error: null });
     try {
-      const res = await fetch("/api/products");
-      if (!res.ok) throw new Error("상품 목록을 불러오지 못했습니다.");
-      const data = await res.json();
+      const data = await apiGet<ProductWithMappings[]>("/api/products");
       set({ products: data, loading: false, loaded: true });
     } catch (e) {
       set({
@@ -35,6 +31,5 @@ export const useProductStore = create<ProductStore>((set, get) => ({
     }
   },
 
-  // 상품 CRUD 후 목록 갱신용
   setProducts: (products) => set({ products, loaded: true }),
 }));

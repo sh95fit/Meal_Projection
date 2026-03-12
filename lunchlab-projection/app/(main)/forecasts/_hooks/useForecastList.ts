@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
+import { apiGet, apiPut, apiPost } from "@/lib/api";
 import { useProductStore } from "@/lib/stores/useProductStore";
 import type { OrderForecast, ProductWithMappings } from "@/types";
 
@@ -52,8 +53,8 @@ export function useForecastList() {
     if (selectedProductIds.length > 0) params.set("productIds", selectedProductIds.join(","));
 
     try {
-      const res = await fetch(`/api/forecasts?${params.toString()}`);
-      setForecasts(await res.json());
+      const data = await apiGet<OrderForecast[]>(`/api/forecasts?${params.toString()}`);
+      setForecasts(data);
     } catch {
       toast.error("목록을 불러오지 못했습니다.");
     } finally {
@@ -74,23 +75,22 @@ export function useForecastList() {
     if (!editTarget) return;
     const previousQty = editTarget.forecast_qty;
     try {
-      await fetch(`/api/forecasts/${editTarget.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ forecast_qty: editQty }),
-      });
-      await fetch("/api/notifications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "forecast-change",
-          data: { date: editTarget.delivery_date, productName: editTarget.product_name, previousQty, newQty: editQty },
-        }),
+      await apiPut(`/api/forecasts/${editTarget.id}`, { forecast_qty: editQty });
+      await apiPost("/api/notifications", {
+        type: "forecast-change",
+        data: {
+          date: editTarget.delivery_date,
+          productName: editTarget.product_name,
+          previousQty,
+          newQty: editQty,
+        },
       });
       toast.success("수량이 수정되었습니다.");
       setEditDialog(false);
       fetchForecasts();
-    } catch { toast.error("수정에 실패했습니다."); }
+    } catch {
+      toast.error("수정에 실패했습니다.");
+    }
   };
 
   // ─── 실적 ───
@@ -103,15 +103,13 @@ export function useForecastList() {
   const handleActual = async () => {
     if (!actualTarget) return;
     try {
-      await fetch(`/api/forecasts/${actualTarget.id}/actual`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actual_qty: actualQty }),
-      });
+      await apiPut(`/api/forecasts/${actualTarget.id}/actual`, { actual_qty: actualQty });
       toast.success("확정 수량이 기입되었습니다.");
       setActualDialog(false);
       fetchForecasts();
-    } catch { toast.error("기입에 실패했습니다."); }
+    } catch {
+      toast.error("기입에 실패했습니다.");
+    }
   };
 
   // ─── 조정 ───
@@ -125,31 +123,32 @@ export function useForecastList() {
   const handleAdjust = async () => {
     if (!adjustTarget) return;
     try {
-      const res = await fetch(`/api/forecasts/${adjustTarget.id}/adjust`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ new_qty: adjustQty, reason: adjustReason }),
+      const result = await apiPost<{
+        previous_qty: number;
+        new_qty: number;
+        adjustment_rate: number;
+      }>(`/api/forecasts/${adjustTarget.id}/adjust`, {
+        new_qty: adjustQty,
+        reason: adjustReason,
       });
-      const result = await res.json();
-      await fetch("/api/notifications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "forecast-adjust",
-          data: {
-            date: adjustTarget.delivery_date,
-            previousQty: result.previous_qty,
-            newQty: adjustQty,
-            diff: adjustQty - result.previous_qty,
-            rate: result.adjustment_rate?.toFixed(1),
-            reason: adjustReason,
-          },
-        }),
+
+      await apiPost("/api/notifications", {
+        type: "forecast-adjust",
+        data: {
+          date: adjustTarget.delivery_date,
+          previousQty: result.previous_qty,
+          newQty: adjustQty,
+          diff: adjustQty - result.previous_qty,
+          rate: result.adjustment_rate?.toFixed(1),
+          reason: adjustReason,
+        },
       });
       toast.success("수량이 조정되었습니다.");
       setAdjustDialog(false);
       fetchForecasts();
-    } catch { toast.error("조정에 실패했습니다."); }
+    } catch {
+      toast.error("조정에 실패했습니다.");
+    }
   };
 
   const toggleProductFilter = (id: number) => {
