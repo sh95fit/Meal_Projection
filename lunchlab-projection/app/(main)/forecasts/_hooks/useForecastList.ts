@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
+import { useProductStore } from "@/lib/stores/useProductStore";
 import type { OrderForecast, ProductWithMappings } from "@/types";
 
 export function useForecastList() {
   const [forecasts, setForecasts] = useState<OrderForecast[]>([]);
-  const [products, setProducts] = useState<ProductWithMappings[]>([]);
+  // zustand 미사용
+  // const [products, setProducts] = useState<ProductWithMappings[]>([]);
+  const { products, fetchProducts } = useProductStore();
   const [loading, setLoading] = useState(true);
 
   // 필터
@@ -30,9 +33,16 @@ export function useForecastList() {
   const [adjustQty, setAdjustQty] = useState(0);
   const [adjustReason, setAdjustReason] = useState("");
 
+  
+  // useEffect(() => {
+  //   fetch("/api/products").then((r) => r.json()).then(setProducts).catch(() => {});
+  // }, []);
+
+  // ─── 상품 로드 (Zustand store 사용) ───
   useEffect(() => {
-    fetch("/api/products").then((r) => r.json()).then(setProducts).catch(() => {});
-  }, []);
+    fetchProducts();
+  }, [fetchProducts]);
+
 
   const fetchForecasts = useCallback(async () => {
     setLoading(true);
