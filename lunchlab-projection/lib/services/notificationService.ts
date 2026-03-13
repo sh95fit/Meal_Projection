@@ -21,10 +21,7 @@ function buildForecastCompleteMessage(data: Record<string, unknown>): string {
     message += `**${month}월 ${day}일 ${dayName}요일**\n\n`;
 
     for (const item of group.items) {
-      const bufferNote = item.buffer !== 0
-        ? ` (조정 ${item.buffer > 0 ? "+" : ""}${item.buffer})`
-        : "";
-      message += `${item.productName} : ${item.qty}${bufferNote}\n\n`;
+      message += `${item.productName} : ${item.qty}\n\n`;
     }
     message += `총계 : ${group.totalQty}\n\n---\n\n`;
   }
