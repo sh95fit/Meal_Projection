@@ -23,16 +23,16 @@ export function useDashboard() {
 
   // ─── 추이 차트 섹션 (독립 필터) ───
   const [trend, setTrend] = useState<TrendResponse | null>(null);
-  const [trendPreset, setTrendPresetState] = useState<PeriodPreset>("60d");
-  const [trendCustomStart, setTrendCustomStart] = useState("");
-  const [trendCustomEnd, setTrendCustomEnd] = useState("");
+  const [trendPreset, _setTrendPreset] = useState<PeriodPreset>("30d");
+  const [trendCustomStart, _setTrendCustomStart] = useState("");
+  const [trendCustomEnd, _setTrendCustomEnd] = useState("");
   const [trendExcludedProducts, setTrendExcludedProducts] = useState<Set<string>>(new Set());
 
   // ─── 고객 변동 섹션 (독립 필터) ───
   const [clients, setClients] = useState<ClientChangeResponse | null>(null);
-  const [clientPreset, setClientPresetState] = useState<PeriodPreset>("7d");
-  const [clientCustomStart, setClientCustomStart] = useState("");
-  const [clientCustomEnd, setClientCustomEnd] = useState("");
+  const [clientPreset, _setClientPreset] = useState<PeriodPreset>("7d");
+  const [clientCustomStart, _setClientCustomStart] = useState("");
+  const [clientCustomEnd, _setClientCustomEnd] = useState("");
   const [dowScope, setDowScope] = useState<ViewScope>("total");
 
   // ─── 드릴다운 상세 ───
@@ -153,14 +153,19 @@ export function useDashboard() {
   }, []);
 
   // ─── 추이 차트 필터 핸들러 ───
-  const setTrendPreset = useCallback((preset: PeriodPreset) => {
-    setTrendPresetState(preset);
+  const setTrendPreset = useCallback((p: PeriodPreset) => {
+    _setTrendPreset(p);
+    // "기간 지정"이 아닌 탭을 누르면 custom 날짜 초기화
+    if (p !== "custom") {
+      _setTrendCustomStart("");
+      _setTrendCustomEnd("");
+    }
   }, []);
 
   const setTrendCustomRange = useCallback((start: string, end: string) => {
-    setTrendCustomStart(start);
-    setTrendCustomEnd(end);
-    setTrendPresetState("custom");
+    _setTrendPreset("custom");          // 날짜를 직접 입력하면 자동으로 custom 모드
+    _setTrendCustomStart(start);
+    _setTrendCustomEnd(end);
   }, []);
 
   const toggleTrendProduct = useCallback((productName: string) => {
@@ -176,14 +181,18 @@ export function useDashboard() {
   }, []);
 
   // ─── 고객 변동 필터 핸들러 ───
-  const setClientPreset = useCallback((preset: PeriodPreset) => {
-    setClientPresetState(preset);
+  const setClientPreset = useCallback((p: PeriodPreset) => {
+    _setClientPreset(p);
+    if (p !== "custom") {
+      _setClientCustomStart("");
+      _setClientCustomEnd("");
+    }
   }, []);
 
   const setClientCustomRange = useCallback((start: string, end: string) => {
-    setClientCustomStart(start);
-    setClientCustomEnd(end);
-    setClientPresetState("custom");
+    _setClientPreset("custom");
+    _setClientCustomStart(start);
+    _setClientCustomEnd(end);
   }, []);
 
   // ─── 실시간 날짜 변경 ───
