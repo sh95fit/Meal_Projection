@@ -43,6 +43,8 @@ export function useDashboard() {
 
   // ─── 로딩 ───
   const [loading, setLoading] = useState(true);
+  const [trendLoading, setTrendLoading] = useState(false);     
+  const [clientsLoading, setClientsLoading] = useState(false);  
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -98,21 +100,27 @@ export function useDashboard() {
 
   const fetchTrend = useCallback(async () => {
     try {
+      setTrendLoading(true);                                    
       const query = getTrendQuery();
       const data = await apiGet<TrendResponse>(`/api/dashboard/trend?${query}`);
       setTrend(data);
     } catch (err) {
       console.error("[Dashboard] trend fetch error:", err);
+    } finally {
+      setTrendLoading(false);                                   
     }
   }, [getTrendQuery]);
 
   const fetchClients = useCallback(async () => {
     try {
+      setClientsLoading(true);                                   // ★ 추가
       const url = getClientUrl();
       const data = await apiGet<ClientChangeResponse>(url);
       setClients(data);
     } catch (err) {
       console.error("[Dashboard] clients fetch error:", err);
+    } finally {
+      setClientsLoading(false);                                  // ★ 추가
     }
   }, [getClientUrl]);
 
@@ -154,6 +162,7 @@ export function useDashboard() {
 
   // ─── 추이 차트 필터 핸들러 ───
   const setTrendPreset = useCallback((p: PeriodPreset) => {
+    setTrendLoading(true);
     _setTrendPreset(p);
     // "기간 지정"이 아닌 탭을 누르면 custom 날짜 초기화
     if (p !== "custom") {
@@ -163,6 +172,7 @@ export function useDashboard() {
   }, []);
 
   const setTrendCustomRange = useCallback((start: string, end: string) => {
+    setTrendLoading(true);
     _setTrendPreset("custom");          // 날짜를 직접 입력하면 자동으로 custom 모드
     _setTrendCustomStart(start);
     _setTrendCustomEnd(end);
@@ -182,6 +192,7 @@ export function useDashboard() {
 
   // ─── 고객 변동 필터 핸들러 ───
   const setClientPreset = useCallback((p: PeriodPreset) => {
+    setClientsLoading(true);
     _setClientPreset(p);
     if (p !== "custom") {
       _setClientCustomStart("");
@@ -190,6 +201,7 @@ export function useDashboard() {
   }, []);
 
   const setClientCustomRange = useCallback((start: string, end: string) => {
+    setClientsLoading(true);
     _setClientPreset("custom");
     _setClientCustomStart(start);
     _setClientCustomEnd(end);
@@ -278,6 +290,8 @@ export function useDashboard() {
 
     // 전체
     loading,
+    trendLoading,
+    clientsLoading,
     refreshAll,
     refreshRealtime,
   };

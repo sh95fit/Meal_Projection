@@ -71,7 +71,7 @@ export function QuantityTable({ clients, scope, productChips, onClientClick }: P
                             }`}
                           >
                             <span
-                              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                              className="inline-block w-2 h-2 rounded-full shrink-0"
                               style={{ backgroundColor: color }}
                             />
                             <span className="w-14 truncate">{p.productName}</span>
@@ -162,7 +162,7 @@ export function QuantityTable({ clients, scope, productChips, onClientClick }: P
                           className="inline-flex items-center gap-1 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5"
                         >
                           <span
-                            className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                            className="inline-block w-2 h-2 rounded-full shrink-0"
                             style={{ backgroundColor: color }}
                           />
                           {p.productName}
