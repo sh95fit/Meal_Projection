@@ -40,6 +40,7 @@ export default function ProductsPage() {
         productName={h.productName} onProductNameChange={h.setProductName}
         offsetDays={h.offsetDays} onOffsetDaysChange={h.setOffsetDays}
         notificationGroup={h.notificationGroup} onNotificationGroupChange={h.setNotificationGroup}
+        color={h.color} onColorChange={h.setColor}
         mappings={h.mappings}
         onAddMapping={h.addMapping} onRemoveMapping={h.removeMapping} onUpdateMapping={h.updateMapping}
         onSubmit={h.handleSubmit}

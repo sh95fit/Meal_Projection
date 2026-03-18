@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, X } from "lucide-react";
 import type { ProductWithMappings } from "@/types";
 import type { MappingInput } from "../_hooks/useProducts";
+import ProductColorPicker from "./ProductColorPicker";
 
 interface Props {
   open: boolean;
@@ -17,6 +18,8 @@ interface Props {
   onOffsetDaysChange: (v: number) => void;
   notificationGroup: string;
   onNotificationGroupChange: (v: string) => void;
+  color: string;
+  onColorChange: (v: string) => void;
   mappings: MappingInput[];
   onAddMapping: () => void;
   onRemoveMapping: (i: number) => void;
@@ -28,6 +31,7 @@ export function ProductDialog({
   open, onOpenChange, editingProduct,
   productName, onProductNameChange, offsetDays, onOffsetDaysChange,
   notificationGroup, onNotificationGroupChange,
+  color, onColorChange,
   mappings, onAddMapping, onRemoveMapping, onUpdateMapping, onSubmit,
 }: Props) {
   return (
@@ -41,6 +45,10 @@ export function ProductDialog({
             <Label>상품명</Label>
             <Input value={productName} onChange={(e) => onProductNameChange(e.target.value)} placeholder="예: 가정식 도시락" />
           </div>
+
+          {/* ── 색상 선택 ── */}
+          <ProductColorPicker value={color} onChange={onColorChange} />
+
           <div className="space-y-2">
             <Label>산출기준일 (D+N)</Label>
             <Input type="number" value={offsetDays} onChange={(e) => onOffsetDaysChange(parseInt(e.target.value) || 0)} min={1} />
