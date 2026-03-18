@@ -6,6 +6,7 @@ import { RealtimeSection } from "./_components/RealtimeSection";
 import { TrendChartSection } from "./_components/TrendChartSection";
 import { DrilldownDetailSection } from "./_components/DrilldownDetailSection";
 import { ClientChangeSection } from "./_components/ClientChangeSection";
+import { ClientDetailModal } from "./_components/ClientDetailModal";  // ★ 추가
 import { Button } from "@/components/ui/button";
 
 export default function DashboardPage() {
@@ -49,6 +50,7 @@ export default function DashboardPage() {
         onPresetChange={h.setTrendPreset}
         onCustomRangeChange={h.setTrendCustomRange}
         onToggleProduct={h.toggleTrendProduct}
+        loading={h.trendLoading}
       />
 
       {/* ── 섹션 3: 드릴다운 상세 ── */}
@@ -71,7 +73,16 @@ export default function DashboardPage() {
         onPresetChange={h.setClientPreset}
         onCustomRangeChange={h.setClientCustomRange}
         onDowScopeChange={h.setDowScope}
-        onClientClick={(id) => console.log("client click:", id)}
+        onClientClick={h.openClientModal}           // ★ console.log → openClientModal
+        loading={h.clientsLoading}
+      />
+
+      {/* ── ★ 고객사 상세 모달 ── */}
+      <ClientDetailModal
+        open={h.clientModalOpen}
+        loading={h.clientModalLoading}
+        data={h.clientModalData}
+        onClose={h.closeClientModal}
       />
     </div>
   );

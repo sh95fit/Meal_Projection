@@ -9,6 +9,7 @@ import type {
   TrendResponse,
   DrilldownDetailResponse,
   ClientChangeResponse,
+  ClientModalData,          // ★ 추가
   PeriodPreset,
   ViewScope,
 } from "@/types/dashboard";
@@ -41,10 +42,15 @@ export function useDashboard() {
   const [drilldownOpen, setDrilldownOpen] = useState(false);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
 
+  // ─── ★ 고객사 상세 모달 ───
+  const [clientModalOpen, setClientModalOpen] = useState(false);
+  const [clientModalData, setClientModalData] = useState<ClientModalData | null>(null);
+  const [clientModalLoading, setClientModalLoading] = useState(false);
+
   // ─── 로딩 ───
   const [loading, setLoading] = useState(true);
-  const [trendLoading, setTrendLoading] = useState(false);     
-  const [clientsLoading, setClientsLoading] = useState(false);  
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [clientsLoading, setClientsLoading] = useState(false);
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -100,27 +106,27 @@ export function useDashboard() {
 
   const fetchTrend = useCallback(async () => {
     try {
-      setTrendLoading(true);                                    
+      setTrendLoading(true);
       const query = getTrendQuery();
       const data = await apiGet<TrendResponse>(`/api/dashboard/trend?${query}`);
       setTrend(data);
     } catch (err) {
       console.error("[Dashboard] trend fetch error:", err);
     } finally {
-      setTrendLoading(false);                                   
+      setTrendLoading(false);
     }
   }, [getTrendQuery]);
 
   const fetchClients = useCallback(async () => {
     try {
-      setClientsLoading(true);                                   // ★ 추가
+      setClientsLoading(true);
       const url = getClientUrl();
       const data = await apiGet<ClientChangeResponse>(url);
       setClients(data);
     } catch (err) {
       console.error("[Dashboard] clients fetch error:", err);
     } finally {
-      setClientsLoading(false);                                  // ★ 추가
+      setClientsLoading(false);
     }
   }, [getClientUrl]);
 
@@ -160,11 +166,33 @@ export function useDashboard() {
     setDrilldownDetail(null);
   }, []);
 
+  // ─── ★ 고객사 상세 모달 핸들러 ───
+  const openClientModal = useCallback(async (accountId: number) => {
+    setClientModalOpen(true);
+    setClientModalLoading(true);
+    setClientModalData(null);
+    try {
+      const data = await apiGet<ClientModalData>(
+        `/api/dashboard/clients/modal?accountId=${accountId}`
+      );
+      setClientModalData(data);
+    } catch (err) {
+      console.error("[Dashboard] client modal fetch error:", err);
+      setClientModalData(null);
+    } finally {
+      setClientModalLoading(false);
+    }
+  }, []);
+
+  const closeClientModal = useCallback(() => {
+    setClientModalOpen(false);
+    setClientModalData(null);
+  }, []);
+
   // ─── 추이 차트 필터 핸들러 ───
   const setTrendPreset = useCallback((p: PeriodPreset) => {
     setTrendLoading(true);
     _setTrendPreset(p);
-    // "기간 지정"이 아닌 탭을 누르면 custom 날짜 초기화
     if (p !== "custom") {
       _setTrendCustomStart("");
       _setTrendCustomEnd("");
@@ -173,7 +201,7 @@ export function useDashboard() {
 
   const setTrendCustomRange = useCallback((start: string, end: string) => {
     setTrendLoading(true);
-    _setTrendPreset("custom");          // 날짜를 직접 입력하면 자동으로 custom 모드
+    _setTrendPreset("custom");
     _setTrendCustomStart(start);
     _setTrendCustomEnd(end);
   }, []);
@@ -287,6 +315,13 @@ export function useDashboard() {
     drilldownLoading,
     openDrilldown,
     closeDrilldown,
+
+    // ★ 고객사 상세 모달
+    clientModalOpen,
+    clientModalData,
+    clientModalLoading,
+    openClientModal,
+    closeClientModal,
 
     // 전체
     loading,
