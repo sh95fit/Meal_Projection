@@ -1,26 +1,122 @@
 // app/(main)/dashboard/_components/TrendChartSection.tsx (전체 교체)
 "use client";
 
+import { ReactElement } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, Cell,
+  ResponsiveContainer, LabelList, Rectangle,
 } from "recharts";
-import type { TrendResponse } from "@/types/dashboard";
+import type { LabelProps, BarShapeProps, BarRectangleItem } from "recharts";
+import type { TrendResponse, TrendRow, PeriodPreset } from "@/types/dashboard";
 
+// ─── Props ───
 interface Props {
   data: TrendResponse | null;
-  /** 바 클릭 시 해당 날짜(YYYY-MM-DD)를 부모에 전달 */
   onBarClick?: (date: string) => void;
-  /** 현재 드릴다운 중인 날짜 (하이라이트 표시용) */
   activeDate?: string | null;
+  preset: PeriodPreset;
+  customStart: string;
+  customEnd: string;
+  excludedProducts: Set<string>;
+  onPresetChange: (p: PeriodPreset) => void;
+  onCustomRangeChange: (start: string, end: string) => void;
+  onToggleProduct: (name: string) => void;
 }
 
-export function TrendChartSection({ data, onBarClick, activeDate }: Props) {
+// ─── 프리셋 옵션 ───
+const TREND_PRESETS: { label: string; value: PeriodPreset }[] = [
+  { label: "올해", value: "year" },
+  { label: "7일", value: "7d" },
+  { label: "30일", value: "30d" },
+  { label: "2개월", value: "60d" },
+  { label: "90일", value: "90d" },
+];
+
+// ─── 활성 날짜 하이라이트용 shape 함수 ───
+function makeHighlightShape(activeDate: string | null | undefined) {
+  return function HighlightBar(props: BarShapeProps) {
+    const payload = (props as BarShapeProps & { payload?: TrendRow }).payload;
+    const isActive = activeDate && payload?.date === activeDate;
+
+    return (
+      <Rectangle
+        {...props}
+        fillOpacity={isActive ? 1 : 0.85}
+        stroke={isActive ? "#1e40af" : "none"}
+        strokeWidth={isActive ? 2 : 0}
+      />
+    );
+  };
+}
+
+// ─── 합계 라벨 (스택 맨 위 Bar 상단에 표시) ───
+function TotalLabel(props: LabelProps): ReactElement | null {
+  const { viewBox, value } = props;
+  const numVal = typeof value === "number" ? value : Number(value);
+  if (!numVal || numVal === 0) return null;
+
+  const vb = viewBox as { x?: number; y?: number; width?: number } | undefined;
+  const x = (vb?.x ?? 0) + (vb?.width ?? 0) / 2;
+  const y = (vb?.y ?? 0) - 8;
+
+  return (
+    <text
+      x={x}
+      y={y}
+      textAnchor="middle"
+      fontSize={10}
+      fontWeight={700}
+      fill="#374151"
+    >
+      {numVal.toLocaleString()}
+    </text>
+  );
+}
+
+// ─── 개별 상품 수량 라벨 ───
+function ProductValueLabel(props: LabelProps): ReactElement | null {
+  const { value, viewBox } = props;
+  const numVal = typeof value === "number" ? value : Number(value);
+  if (!numVal || numVal === 0) return null;
+
+  const vb = viewBox as { x?: number; y?: number; width?: number; height?: number } | undefined;
+  const h = vb?.height ?? 0;
+  const w = vb?.width ?? 0;
+  const x = (vb?.x ?? 0) + w / 2;
+
+  // 텍스트 길이 추정 (글자수 × 6px)
+  const textLen = numVal.toLocaleString().length * 6;
+
+  // 영역이 너무 작으면 (높이 16px 미만 또는 너비보다 텍스트가 길면) 생략
+  if (h < 16 || w < textLen + 4) return null;
+
+  const y = (vb?.y ?? 0) + h / 2 + 4;
+
+  return (
+    <text x={x} y={y} textAnchor="middle" fontSize={9} fill="#fff">
+      {numVal.toLocaleString()}
+    </text>
+  );
+}
+
+export function TrendChartSection({
+  data,
+  onBarClick,
+  activeDate,
+  preset,
+  customStart,
+  customEnd,
+  excludedProducts,
+  onPresetChange,
+  onCustomRangeChange,
+  onToggleProduct,
+}: Props) {
   if (!data || data.rows.length === 0) {
     return (
       <Card>
-        <CardHeader><CardTitle className="text-lg">② 추이 차트</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-lg">과거 주문 이력</CardTitle></CardHeader>
         <CardContent>
           <p className="text-gray-400 text-sm">데이터가 없습니다.</p>
         </CardContent>
@@ -28,24 +124,44 @@ export function TrendChartSection({ data, onBarClick, activeDate }: Props) {
     );
   }
 
-  /**
-   * Recharts의 Bar onClick 이벤트에서 해당 행의 date를 추출하여 콜백 호출.
-   * Recharts Bar onClick 시그니처: (data, index) => void
-   * data.payload에 원래 TrendRow가 들어있습니다.
-   */
-  const handleBarClick = (data: Record<string, unknown>) => {
+  const visibleProducts = data.productList.filter(
+    (p) => !excludedProducts.has(p.productName)
+  );
+
+  const filteredRows: TrendRow[] = data.rows.map((row) => {
+    const newRow: TrendRow = { date: row.date, dayLabel: row.dayLabel, _total: 0 };
+    let total = 0;
+    for (const p of visibleProducts) {
+      const val = Number(row[p.productName] || 0);
+      newRow[p.productName] = val;
+      total += val;
+    }
+    newRow._total = total;
+    return newRow;
+  });
+
+  // ── Bar onClick 핸들러 (BarMouseEvent 시그니처에 맞춤) ──
+  const handleBarClick = (
+    data: BarRectangleItem,
+    _index: number,
+    _event: React.MouseEvent<SVGPathElement, MouseEvent>,
+  ) => {
     if (!onBarClick) return;
-    const payload = data?.payload as Record<string, unknown> | undefined;
+    const payload = data?.payload as TrendRow | undefined;
     if (payload?.date) {
       onBarClick(String(payload.date));
     }
   };
 
+  const showProductLabels = visibleProducts.length > 1;
+  const highlightShape = makeHighlightShape(activeDate);
+  const lastProductIndex = visibleProducts.length - 1;
+
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">② 추이 차트</CardTitle>
+          <CardTitle className="text-lg">과거 주문 이력</CardTitle>
           {onBarClick && (
             <p className="text-xs text-muted-foreground">
               막대를 클릭하면 해당 일자의 상세 드릴다운을 확인할 수 있습니다.
@@ -53,39 +169,107 @@ export function TrendChartSection({ data, onBarClick, activeDate }: Props) {
           )}
         </div>
       </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={400}>
-          <BarChart
-            data={data.rows}
-            style={{ cursor: onBarClick ? "pointer" : "default" }}
-          >
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            {data.productList.map((product) => (
-              <Bar
-                key={product.productId}
-                dataKey={product.productName}
-                stackId="stack"
-                fill={product.color}
-                name={product.productName}
-                onClick={handleBarClick}
+      <CardContent className="space-y-3">
+        {/* ── 기간 필터 ── */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {TREND_PRESETS.map((opt) => (
+            <Button
+              key={opt.value}
+              variant={preset === opt.value ? "default" : "outline"}
+              size="sm"
+              onClick={() => onPresetChange(opt.value)}
+            >
+              {opt.label}
+            </Button>
+          ))}
+          <div className="flex items-center gap-1 ml-2">
+            <input
+              type="date"
+              className="border rounded px-2 py-1 text-sm"
+              value={customStart}
+              onChange={(e) => onCustomRangeChange(e.target.value, customEnd)}
+            />
+            <span className="text-gray-400">~</span>
+            <input
+              type="date"
+              className="border rounded px-2 py-1 text-sm"
+              value={customEnd}
+              onChange={(e) => onCustomRangeChange(customStart, e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* ── 상품 필터 (포함/제외) ── */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-muted-foreground font-medium">상품:</span>
+          {data.productList.map((p) => {
+            const isExcluded = excludedProducts.has(p.productName);
+            return (
+              <button
+                key={p.productId}
+                type="button"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                  isExcluded
+                    ? "bg-gray-100 text-gray-400 border-gray-200 line-through"
+                    : "text-white border-transparent"
+                }`}
+                style={isExcluded ? {} : { backgroundColor: p.color }}
+                onClick={() => onToggleProduct(p.productName)}
               >
-                {/* 활성 날짜 하이라이트 */}
-                {data.rows.map((row, idx) => (
-                  <Cell
-                    key={idx}
-                    fillOpacity={activeDate && row.date === activeDate ? 1 : 0.85}
-                    stroke={activeDate && row.date === activeDate ? "#1e40af" : "none"}
-                    strokeWidth={activeDate && row.date === activeDate ? 2 : 0}
-                  />
-                ))}
-              </Bar>
-            ))}
-          </BarChart>
-        </ResponsiveContainer>
+                <span
+                  className="inline-block w-2 h-2 rounded-full"
+                  style={{ backgroundColor: isExcluded ? "#d1d5db" : "#fff" }}
+                />
+                {p.productName}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── 차트 ── */}
+        <ResponsiveContainer width="100%" height={400}>
+        <BarChart
+          data={filteredRows}
+          margin={{ top: 25, right: 10, left: 10, bottom: 0 }}
+          style={{ cursor: onBarClick ? "pointer" : "default" }}
+        >
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
+          <YAxis tick={{ fontSize: 11 }} />
+          <Tooltip
+            formatter={(value) => {
+              if (Array.isArray(value)) return value.join(", ");
+              return value != null ? Number(value).toLocaleString() : "0";
+            }}
+          />
+          <Legend />
+          {visibleProducts.map((product, idx) => (
+            <Bar
+              key={product.productId}
+              dataKey={product.productName}
+              stackId="stack"
+              fill={product.color}
+              name={product.productName}
+              onClick={handleBarClick}
+              shape={highlightShape}
+            >
+              {showProductLabels && (
+                <LabelList
+                  dataKey={product.productName}
+                  content={ProductValueLabel}
+                />
+              )}
+              {idx === lastProductIndex && (
+                <LabelList
+                  dataKey="_total"
+                  position="top"
+                  content={TotalLabel}
+                />
+              )}
+            </Bar>
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
       </CardContent>
     </Card>
   );

@@ -10,52 +10,84 @@ import type {
   DrilldownDetailResponse,
   ClientChangeResponse,
   PeriodPreset,
+  ViewScope,
 } from "@/types/dashboard";
 
 const REFRESH_INTERVAL = 3 * 60 * 1000;
 
 export function useDashboard() {
-  // ─── 실시간 섹션 날짜 (기본: 다음 영업일) ───
+  // ─── 실시간 섹션 ───
   const [realtimeDate, setRealtimeDateState] = useState<string>(() => getDefaultRealtimeDate());
-
-  // ─── 데이터 상태 ───
   const [realtime, setRealtime] = useState<RealtimeResponse | null>(null);
-  const [trend, setTrend] = useState<TrendResponse | null>(null);
-  const [clients, setClients] = useState<ClientChangeResponse | null>(null);
+  const [realtimeLoading, setRealtimeLoading] = useState(false);
 
-  // ─── 드릴다운 상세 상태 (차트 바 클릭) ───
+  // ─── 추이 차트 섹션 (독립 필터) ───
+  const [trend, setTrend] = useState<TrendResponse | null>(null);
+  const [trendPreset, setTrendPresetState] = useState<PeriodPreset>("60d");
+  const [trendCustomStart, setTrendCustomStart] = useState("");
+  const [trendCustomEnd, setTrendCustomEnd] = useState("");
+  const [trendExcludedProducts, setTrendExcludedProducts] = useState<Set<string>>(new Set());
+
+  // ─── 고객 변동 섹션 (독립 필터) ───
+  const [clients, setClients] = useState<ClientChangeResponse | null>(null);
+  const [clientPreset, setClientPresetState] = useState<PeriodPreset>("7d");
+  const [clientCustomStart, setClientCustomStart] = useState("");
+  const [clientCustomEnd, setClientCustomEnd] = useState("");
+  const [dowScope, setDowScope] = useState<ViewScope>("total");
+
+  // ─── 드릴다운 상세 ───
   const [drilldownDetail, setDrilldownDetail] = useState<DrilldownDetailResponse | null>(null);
   const [drilldownDate, setDrilldownDate] = useState<string | null>(null);
   const [drilldownOpen, setDrilldownOpen] = useState(false);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
 
-  // ─── 로딩 상태 ───
+  // ─── 로딩 ───
   const [loading, setLoading] = useState(true);
-  const [realtimeLoading, setRealtimeLoading] = useState(false);
-
-  // ─── 기간 필터 상태 ───
-  const [periodPreset, setPeriodPresetState] = useState<PeriodPreset>("7d");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ─── 날짜 범위 유틸 ───
-  const getDateRangeQuery = useCallback((): string => {
-    if (periodPreset === "custom" && customStart && customEnd) {
-      return `start=${customStart}&end=${customEnd}`;
+  // ─── 추이 차트: 날짜 범위 쿼리 ───
+  const getTrendQuery = useCallback((): string => {
+    if (trendPreset === "custom" && trendCustomStart && trendCustomEnd) {
+      return `start=${trendCustomStart}&end=${trendCustomEnd}`;
     }
-    return `preset=${periodPreset}`;
-  }, [periodPreset, customStart, customEnd]);
+    return `preset=${trendPreset}`;
+  }, [trendPreset, trendCustomStart, trendCustomEnd]);
 
-  // ─── 실시간 현황 조회 (날짜 파라미터 포함) ───
+  // ─── 고객 변동: 날짜 범위 URL ───
+  const getClientUrl = useCallback((): string => {
+    const today = getToday();
+    if (clientPreset === "custom" && clientCustomStart && clientCustomEnd) {
+      return `/api/dashboard/clients?start=${clientCustomStart}&end=${clientCustomEnd}`;
+    }
+    let start: string;
+    switch (clientPreset) {
+      case "year":
+        start = `${today.split("-")[0]}-01-01`;
+        break;
+      case "7d":
+        start = addDays(today, -6);
+        break;
+      case "30d":
+        start = addDays(today, -29);
+        break;
+      case "60d":
+        start = addDays(today, -59);
+        break;
+      case "90d":
+      default:
+        start = addDays(today, -89);
+        break;
+    }
+    return `/api/dashboard/clients?start=${start}&end=${today}`;
+  }, [clientPreset, clientCustomStart, clientCustomEnd]);
+
+  // ─── Fetch 함수들 ───
   const fetchRealtime = useCallback(async (date?: string) => {
     const targetDate = date || realtimeDate;
     try {
       setRealtimeLoading(true);
-      const data = await apiGet<RealtimeResponse>(
-        `/api/dashboard/realtime?date=${targetDate}`
-      );
+      const data = await apiGet<RealtimeResponse>(`/api/dashboard/realtime?date=${targetDate}`);
       setRealtime(data);
     } catch (err) {
       console.error("[Dashboard] realtime fetch error:", err);
@@ -64,53 +96,27 @@ export function useDashboard() {
     }
   }, [realtimeDate]);
 
-  /** 실시간 섹션 날짜 변경 */
-  const setRealtimeDate = useCallback((date: string) => {
-    setRealtimeDateState(date);
-  }, []);
-
   const fetchTrend = useCallback(async () => {
     try {
-      const query = getDateRangeQuery();
+      const query = getTrendQuery();
       const data = await apiGet<TrendResponse>(`/api/dashboard/trend?${query}`);
       setTrend(data);
     } catch (err) {
       console.error("[Dashboard] trend fetch error:", err);
     }
-  }, [getDateRangeQuery]);
+  }, [getTrendQuery]);
 
   const fetchClients = useCallback(async () => {
     try {
-      let url = "/api/dashboard/clients";
-      if (periodPreset === "custom" && customStart && customEnd) {
-        url += `?start=${customStart}&end=${customEnd}`;
-      } else {
-        const today = getToday();
-        let start: string;
-        switch (periodPreset) {
-          case "year":
-            start = `${today.split("-")[0]}-01-01`;
-            break;
-          case "7d":
-            start = addDays(today, -6);
-            break;
-          case "30d":
-            start = addDays(today, -29);
-            break;
-          case "90d":
-          default:
-            start = addDays(today, -89);
-        }
-        url += `?start=${start}&end=${today}`;
-      }
+      const url = getClientUrl();
       const data = await apiGet<ClientChangeResponse>(url);
       setClients(data);
     } catch (err) {
       console.error("[Dashboard] clients fetch error:", err);
     }
-  }, [periodPreset, customStart, customEnd]);
+  }, [getClientUrl]);
 
-  // ─── 전체 새로고침 (순차 실행) ───
+  // ─── 전체 새로고침 ───
   const refreshAll = useCallback(async () => {
     setLoading(true);
     await fetchRealtime();
@@ -122,7 +128,7 @@ export function useDashboard() {
     await fetchRealtime();
   }, [fetchRealtime]);
 
-  // ─── 드릴다운 상세 열기 ───
+  // ─── 드릴다운 ───
   const openDrilldown = useCallback(async (date: string) => {
     setDrilldownDate(date);
     setDrilldownOpen(true);
@@ -146,15 +152,43 @@ export function useDashboard() {
     setDrilldownDetail(null);
   }, []);
 
-  // ─── 필터 핸들러 ───
-  const setPeriodPreset = useCallback((preset: PeriodPreset) => {
-    setPeriodPresetState(preset);
+  // ─── 추이 차트 필터 핸들러 ───
+  const setTrendPreset = useCallback((preset: PeriodPreset) => {
+    setTrendPresetState(preset);
   }, []);
 
-  const setCustomRange = useCallback((start: string, end: string) => {
-    setCustomStart(start);
-    setCustomEnd(end);
-    setPeriodPresetState("custom");
+  const setTrendCustomRange = useCallback((start: string, end: string) => {
+    setTrendCustomStart(start);
+    setTrendCustomEnd(end);
+    setTrendPresetState("custom");
+  }, []);
+
+  const toggleTrendProduct = useCallback((productName: string) => {
+    setTrendExcludedProducts((prev) => {
+      const next = new Set(prev);
+      if (next.has(productName)) {
+        next.delete(productName);
+      } else {
+        next.add(productName);
+      }
+      return next;
+    });
+  }, []);
+
+  // ─── 고객 변동 필터 핸들러 ───
+  const setClientPreset = useCallback((preset: PeriodPreset) => {
+    setClientPresetState(preset);
+  }, []);
+
+  const setClientCustomRange = useCallback((start: string, end: string) => {
+    setClientCustomStart(start);
+    setClientCustomEnd(end);
+    setClientPresetState("custom");
+  }, []);
+
+  // ─── 실시간 날짜 변경 ───
+  const setRealtimeDate = useCallback((date: string) => {
+    setRealtimeDateState(date);
   }, []);
 
   // ─── 초기 로드 ───
@@ -171,16 +205,23 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeDate]);
 
-  // ─── 기간 변경 시 trend + clients 재조회 ───
+  // ─── 추이 차트 필터 변경 시 재조회 (독립) ───
   useEffect(() => {
     if (realtime) {
       fetchTrend();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trendPreset, trendCustomStart, trendCustomEnd]);
+
+  // ─── 고객 변동 필터 변경 시 재조회 (독립) ───
+  useEffect(() => {
+    if (realtime) {
       fetchClients();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodPreset, customStart, customEnd]);
+  }, [clientPreset, clientCustomStart, clientCustomEnd]);
 
-  // ─── 자동 새로고침 ───
+  // ─── 자동 새로고침 (실시간만) ───
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(refreshRealtime, REFRESH_INTERVAL);
@@ -190,15 +231,35 @@ export function useDashboard() {
   }, [refreshRealtime]);
 
   return {
+    // 데이터
     realtime,
     trend,
     clients,
 
-    // 실시간 날짜
+    // 실시간
     realtimeDate,
     setRealtimeDate,
+    realtimeLoading,
 
-    // 드릴다운 상세
+    // 추이 차트 필터
+    trendPreset,
+    trendCustomStart,
+    trendCustomEnd,
+    trendExcludedProducts,
+    setTrendPreset,
+    setTrendCustomRange,
+    toggleTrendProduct,
+
+    // 고객 변동 필터
+    clientPreset,
+    clientCustomStart,
+    clientCustomEnd,
+    dowScope,
+    setClientPreset,
+    setClientCustomRange,
+    setDowScope,
+
+    // 드릴다운
     drilldownDetail,
     drilldownDate,
     drilldownOpen,
@@ -206,16 +267,9 @@ export function useDashboard() {
     openDrilldown,
     closeDrilldown,
 
+    // 전체
     loading,
-    realtimeLoading,
-
-    periodPreset,
-    customStart,
-    customEnd,
-
-    setPeriodPreset,
-    setCustomRange,
-    refreshRealtime,
     refreshAll,
+    refreshRealtime,
   };
 }
