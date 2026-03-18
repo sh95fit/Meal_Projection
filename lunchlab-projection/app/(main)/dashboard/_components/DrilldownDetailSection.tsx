@@ -10,7 +10,6 @@ import { WeekdayTable } from "./WeekdayTable";
 import { QuantityTable } from "./QuantityTable";
 import type {
   DrilldownDetailResponse,
-  ViewScope,
   QuantityClient,
 } from "@/types/dashboard";
 
@@ -74,8 +73,6 @@ function SummaryCard({
 // ═══════════════════════════════════════════════
 export function DrilldownDetailSection({ data, date, loading, onClose }: Props) {
   const [weekdayFilter, setWeekdayFilter] = useState<WeekdayFilter>("all");
-  const [weekdayScope, setWeekdayScope] = useState<ViewScope>("total");
-  const [qtyScope, setQtyScope] = useState<ViewScope>("total");
 
   if (loading) {
     return (
@@ -156,27 +153,11 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
         {/* ── 요일 기준 특이 고객사 ── */}
         <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
+            {/* <div className="flex items-center justify-between flex-wrap gap-2"> */}
               <CardTitle className="text-base">
                 요일 기준 특이 고객사 (전주 동일 요일 비교)
               </CardTitle>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant={weekdayScope === "total" ? "default" : "outline"}
-                  onClick={() => setWeekdayScope("total")}
-                >
-                  총 수량
-                </Button>
-                <Button
-                  size="sm"
-                  variant={weekdayScope === "product" ? "default" : "outline"}
-                  onClick={() => setWeekdayScope("product")}
-                >
-                  상품별
-                </Button>
-              </div>
-            </div>
+            {/* </div> */}
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
@@ -210,7 +191,7 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
             <WeekdayTable
               clients={data.weekdayClients}
               filter={weekdayFilter}
-              scope={weekdayScope}
+              scope="total"
               productChips={data.productChips}
             />
           </CardContent>
@@ -219,33 +200,17 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
         {/* ── 수량 기준 이상치 ── */}
         <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
+            {/* <div className="flex items-center justify-between flex-wrap gap-2"> */}
               <CardTitle className="text-base">
                 수량 기준 이상치 (전주 대비 차이 ±3 이상)
               </CardTitle>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant={qtyScope === "total" ? "default" : "outline"}
-                  onClick={() => setQtyScope("total")}
-                >
-                  총 수량
-                </Button>
-                <Button
-                  size="sm"
-                  variant={qtyScope === "product" ? "default" : "outline"}
-                  onClick={() => setQtyScope("product")}
-                >
-                  상품별
-                </Button>
-              </div>
-            </div>
+            {/* </div> */}
           </CardHeader>
           <CardContent>
             {/* ★ 외부 QuantityTable 컴포넌트 사용 */}
             <QuantityTable
               clients={filteredQuantityClients}
-              scope={qtyScope}
+              scope="total"
               productChips={data.productChips}
             />
           </CardContent>
