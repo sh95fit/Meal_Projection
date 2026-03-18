@@ -48,7 +48,7 @@ export default function ProductColorPicker({
           className="flex items-center gap-3 px-3 py-2 border rounded-lg bg-background hover:bg-muted/50 transition-colors w-full"
         >
           <span
-            className="w-8 h-8 rounded-md border shadow-sm flex-shrink-0"
+            className="w-8 h-8 rounded-md border shadow-sm shrink-0"
             style={{ backgroundColor: value }}
           />
           <span className="text-sm font-mono text-muted-foreground">
@@ -79,7 +79,7 @@ export default function ProductColorPicker({
                 placeholder="aabbcc"
               />
               <span
-                className="w-7 h-7 rounded-md border shadow-sm flex-shrink-0"
+                className="w-7 h-7 rounded-md border shadow-sm shrink-0"
                 style={{ backgroundColor: value }}
               />
             </div>

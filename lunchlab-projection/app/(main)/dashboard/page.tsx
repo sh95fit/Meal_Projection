@@ -7,27 +7,11 @@ import { TrendChartSection } from "./_components/TrendChartSection";
 import { DrilldownDetailSection } from "./_components/DrilldownDetailSection";
 import { ClientChangeSection } from "./_components/ClientChangeSection";
 import { Button } from "@/components/ui/button";
-import type { PeriodPreset } from "@/types/dashboard";
-
-const PRESET_OPTIONS: { label: string; value: PeriodPreset }[] = [
-  { label: "올해", value: "year" },
-  { label: "7일", value: "7d" },
-  { label: "30일", value: "30d" },
-  { label: "90일", value: "90d" },
-];
 
 export default function DashboardPage() {
-  const {
-    realtime, trend, clients,
-    realtimeDate, setRealtimeDate,
-    drilldownDetail, drilldownDate, drilldownOpen, drilldownLoading,
-    openDrilldown, closeDrilldown,
-    loading, realtimeLoading,
-    periodPreset, customStart, customEnd,
-    setPeriodPreset, setCustomRange, refreshAll,
-  } = useDashboard();
+  const h = useDashboard();
 
-  if (loading) {
+  if (h.loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <p className="text-gray-500 animate-pulse">대시보드를 불러오는 중...</p>
@@ -40,67 +24,55 @@ export default function DashboardPage() {
       {/* ── 헤더 ── */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">대시보드</h1>
-        <Button variant="outline" size="sm" onClick={refreshAll}>
+        <Button variant="outline" size="sm" onClick={h.refreshAll}>
           ↻ 새로고침
         </Button>
       </div>
 
-      {/* ── 섹션 1: 실시간 현황 (자체 날짜 선택) ── */}
+      {/* ── 섹션 1: 실시간 현황 ── */}
       <RealtimeSection
-        data={realtime}
-        loading={realtimeLoading}
-        currentDate={realtimeDate}
-        onDateChange={setRealtimeDate}
+        data={h.realtime}
+        loading={h.realtimeLoading}
+        currentDate={h.realtimeDate}
+        onDateChange={h.setRealtimeDate}
       />
 
-      {/* ── 기간 필터 (추이 차트 · 고객 변동용) ── */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {PRESET_OPTIONS.map((opt) => (
-          <Button
-            key={opt.value}
-            variant={periodPreset === opt.value ? "default" : "outline"}
-            size="sm"
-            onClick={() => setPeriodPreset(opt.value)}
-          >
-            {opt.label}
-          </Button>
-        ))}
-        <div className="flex items-center gap-1 ml-2">
-          <input
-            type="date"
-            className="border rounded px-2 py-1 text-sm"
-            value={customStart}
-            onChange={(e) => setCustomRange(e.target.value, customEnd)}
-          />
-          <span className="text-gray-400">~</span>
-          <input
-            type="date"
-            className="border rounded px-2 py-1 text-sm"
-            value={customEnd}
-            onChange={(e) => setCustomRange(customStart, e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* ── 섹션 2: 추이 차트 ── */}
+      {/* ── 섹션 2: 추이 차트 (자체 필터 포함) ── */}
       <TrendChartSection
-        data={trend}
-        onBarClick={openDrilldown}
-        activeDate={drilldownDate}
+        data={h.trend}
+        onBarClick={h.openDrilldown}
+        activeDate={h.drilldownDate}
+        preset={h.trendPreset}
+        customStart={h.trendCustomStart}
+        customEnd={h.trendCustomEnd}
+        excludedProducts={h.trendExcludedProducts}
+        onPresetChange={h.setTrendPreset}
+        onCustomRangeChange={h.setTrendCustomRange}
+        onToggleProduct={h.toggleTrendProduct}
       />
 
       {/* ── 섹션 3: 드릴다운 상세 ── */}
-      {drilldownOpen && (
+      {h.drilldownOpen && (
         <DrilldownDetailSection
-          data={drilldownDetail}
-          date={drilldownDate}
-          loading={drilldownLoading}
-          onClose={closeDrilldown}
+          data={h.drilldownDetail}
+          date={h.drilldownDate}
+          loading={h.drilldownLoading}
+          onClose={h.closeDrilldown}
         />
       )}
 
-      {/* ── 섹션 4: 고객 변동 현황 ── */}
-      <ClientChangeSection data={clients} />
+      {/* ── 섹션 4: 고객 변동 (자체 필터 포함) ── */}
+      <ClientChangeSection
+        data={h.clients}
+        preset={h.clientPreset}
+        customStart={h.clientCustomStart}
+        customEnd={h.clientCustomEnd}
+        dowScope={h.dowScope}
+        onPresetChange={h.setClientPreset}
+        onCustomRangeChange={h.setClientCustomRange}
+        onDowScopeChange={h.setDowScope}
+        onClientClick={(id) => console.log("client click:", id)}
+      />
     </div>
   );
 }

@@ -275,10 +275,14 @@ export interface ClientChangeResponse {
  * - year   : 올해 전체
  * - 7d     : 최근 7일
  * - 30d    : 최근 30일
+ * - 60d    : 최근 60일
  * - 90d    : 최근 90일
  * - custom : 사용자 지정 기간
  */
-export type PeriodPreset = "year" | "7d" | "30d" | "90d" | "custom";
+export type PeriodPreset = "year" | "7d" | "30d" | "60d" | "90d" | "custom";
+
+/** 요일별 증감 테이블 보기 범위 */
+export type ViewScope = "total" | "product";
 
 // ─── [G] 고객 변동 확장 (상세 분석용) ────────────────────────────
 

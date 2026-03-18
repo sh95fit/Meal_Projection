@@ -62,7 +62,7 @@ export function RealtimeSection({ data, loading, currentDate, onDateChange }: Pr
     <Card>
       <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3">
-          <CardTitle className="text-lg">① 실시간 현황</CardTitle>
+          <CardTitle className="text-lg">실시간 주문 현황</CardTitle>
 
           {/* ── 날짜 선택 UI ── */}
           <div className="flex items-center gap-1">

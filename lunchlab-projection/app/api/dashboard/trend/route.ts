@@ -57,7 +57,6 @@ export async function GET(request: NextRequest) {
     let startDate: string;
 
     if (preset) {
-      // ── 프리셋 모드 ──
       switch (preset) {
         case "year":
           startDate = `${today.slice(0, 4)}-01-01`;
@@ -68,11 +67,14 @@ export async function GET(request: NextRequest) {
         case "30d":
           startDate = addDays(today, -29);
           break;
+        case "60d":
+          startDate = addDays(today, -59);
+          break;
         case "90d":
           startDate = addDays(today, -89);
           break;
         default:
-          startDate = addDays(today, -6);
+          startDate = addDays(today, -59); // 기본 60일
       }
     } else {
       // ── 커스텀 모드 ──
