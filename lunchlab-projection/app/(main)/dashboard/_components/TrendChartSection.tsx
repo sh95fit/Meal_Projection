@@ -25,13 +25,14 @@ interface Props {
   onToggleProduct: (name: string) => void;
 }
 
-// ─── 프리셋 옵션 ───
+// ─── 프리셋 옵션 ("기간 지정" 추가) ───
 const TREND_PRESETS: { label: string; value: PeriodPreset }[] = [
-  { label: "올해", value: "year" },
-  { label: "7일", value: "7d" },
-  { label: "30일", value: "30d" },
-  { label: "2개월", value: "60d" },
-  { label: "90일", value: "90d" },
+  { label: "올해",   value: "year" },
+  { label: "7일",    value: "7d" },
+  { label: "30일",   value: "30d" },
+  { label: "2개월",  value: "60d" },
+  { label: "90일",   value: "90d" },
+  { label: "기간 지정", value: "custom" },
 ];
 
 // ─── 활성 날짜 하이라이트용 shape 함수 ───
@@ -86,10 +87,7 @@ function ProductValueLabel(props: LabelProps): ReactElement | null {
   const w = vb?.width ?? 0;
   const x = (vb?.x ?? 0) + w / 2;
 
-  // 텍스트 길이 추정 (글자수 × 6px)
   const textLen = numVal.toLocaleString().length * 6;
-
-  // 영역이 너무 작으면 (높이 16px 미만 또는 너비보다 텍스트가 길면) 생략
   if (h < 16 || w < textLen + 4) return null;
 
   const y = (vb?.y ?? 0) + h / 2 + 4;
@@ -140,7 +138,6 @@ export function TrendChartSection({
     return newRow;
   });
 
-  // ── Bar onClick 핸들러 (BarMouseEvent 시그니처에 맞춤) ──
   const handleBarClick = (
     data: BarRectangleItem,
     _index: number,
@@ -182,21 +179,25 @@ export function TrendChartSection({
               {opt.label}
             </Button>
           ))}
-          <div className="flex items-center gap-1 ml-2">
-            <input
-              type="date"
-              className="border rounded px-2 py-1 text-sm"
-              value={customStart}
-              onChange={(e) => onCustomRangeChange(e.target.value, customEnd)}
-            />
-            <span className="text-gray-400">~</span>
-            <input
-              type="date"
-              className="border rounded px-2 py-1 text-sm"
-              value={customEnd}
-              onChange={(e) => onCustomRangeChange(customStart, e.target.value)}
-            />
-          </div>
+
+          {/* ★ "기간 지정" 탭 선택 시에만 날짜 입력 표시 */}
+          {preset === "custom" && (
+            <div className="flex items-center gap-1 ml-2">
+              <input
+                type="date"
+                className="border rounded px-2 py-1 text-sm"
+                value={customStart}
+                onChange={(e) => onCustomRangeChange(e.target.value, customEnd)}
+              />
+              <span className="text-gray-400">~</span>
+              <input
+                type="date"
+                className="border rounded px-2 py-1 text-sm"
+                value={customEnd}
+                onChange={(e) => onCustomRangeChange(customStart, e.target.value)}
+              />
+            </div>
+          )}
         </div>
 
         {/* ── 상품 필터 (포함/제외) ── */}
@@ -228,48 +229,48 @@ export function TrendChartSection({
 
         {/* ── 차트 ── */}
         <ResponsiveContainer width="100%" height={400}>
-        <BarChart
-          data={filteredRows}
-          margin={{ top: 25, right: 10, left: 10, bottom: 0 }}
-          style={{ cursor: onBarClick ? "pointer" : "default" }}
-        >
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
-          <YAxis tick={{ fontSize: 11 }} />
-          <Tooltip
-            formatter={(value) => {
-              if (Array.isArray(value)) return value.join(", ");
-              return value != null ? Number(value).toLocaleString() : "0";
-            }}
-          />
-          <Legend />
-          {visibleProducts.map((product, idx) => (
-            <Bar
-              key={product.productId}
-              dataKey={product.productName}
-              stackId="stack"
-              fill={product.color}
-              name={product.productName}
-              onClick={handleBarClick}
-              shape={highlightShape}
-            >
-              {showProductLabels && (
-                <LabelList
-                  dataKey={product.productName}
-                  content={ProductValueLabel}
-                />
-              )}
-              {idx === lastProductIndex && (
-                <LabelList
-                  dataKey="_total"
-                  position="top"
-                  content={TotalLabel}
-                />
-              )}
-            </Bar>
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
+          <BarChart
+            data={filteredRows}
+            margin={{ top: 25, right: 10, left: 10, bottom: 0 }}
+            style={{ cursor: onBarClick ? "pointer" : "default" }}
+          >
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} />
+            <Tooltip
+              formatter={(value) => {
+                if (Array.isArray(value)) return value.join(", ");
+                return value != null ? Number(value).toLocaleString() : "0";
+              }}
+            />
+            <Legend />
+            {visibleProducts.map((product, idx) => (
+              <Bar
+                key={product.productId}
+                dataKey={product.productName}
+                stackId="stack"
+                fill={product.color}
+                name={product.productName}
+                onClick={handleBarClick}
+                shape={highlightShape}
+              >
+                {showProductLabels && (
+                  <LabelList
+                    dataKey={product.productName}
+                    content={ProductValueLabel}
+                  />
+                )}
+                {idx === lastProductIndex && (
+                  <LabelList
+                    dataKey="_total"
+                    position="top"
+                    content={TotalLabel}
+                  />
+                )}
+              </Bar>
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
       </CardContent>
     </Card>
   );
