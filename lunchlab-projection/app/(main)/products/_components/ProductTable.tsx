@@ -15,6 +15,7 @@ export function ProductTable({ products, onEdit, onDelete }: Props) {
     <Table>
       <TableHeader>
         <TableRow>
+          <TableHead className="w-12">색상</TableHead>
           <TableHead>상품명</TableHead>
           <TableHead>산출기준일</TableHead>
           <TableHead>알림 그룹</TableHead>
@@ -25,12 +26,19 @@ export function ProductTable({ products, onEdit, onDelete }: Props) {
       <TableBody>
         {products.map((p) => (
           <TableRow key={p.id}>
+            <TableCell>
+              <span
+                className="inline-block w-5 h-5 rounded-full border shadow-sm"
+                style={{ backgroundColor: p.color || "#818cf8" }}
+                title={p.color}
+              />
+            </TableCell>
             <TableCell className="font-medium">{p.product_name}</TableCell>
             <TableCell>D+{p.offset_days}</TableCell>
             <TableCell>{p.notification_group || <span className="text-muted-foreground">-</span>}</TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-1">
-                {p.mappings.map((m) => (
+                {(p.mappings ?? []).map((m) => (
                   <Badge key={m.id} variant="secondary">{m.channel}: {m.external_id}</Badge>
                 ))}
               </div>
@@ -47,7 +55,7 @@ export function ProductTable({ products, onEdit, onDelete }: Props) {
         ))}
         {products.length === 0 && (
           <TableRow>
-            <TableCell colSpan={5} className="text-center py-8">
+            <TableCell colSpan={6} className="text-center py-8">
               <p className="text-muted-foreground">등록된 상품이 없습니다</p>
             </TableCell>
           </TableRow>

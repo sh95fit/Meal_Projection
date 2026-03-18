@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 import { useProductStore } from "@/lib/stores/useProductStore";
+import { getRandomProductColor } from "@/lib/utils/color";
 import type { ProductWithMappings } from "@/types";
 
 export interface MappingInput {
@@ -22,6 +23,7 @@ export function useProducts() {
   const [offsetDays, setOffsetDays] = useState(3);
   const [notificationGroup, setNotificationGroup] = useState("");
   const [mappings, setMappings] = useState<MappingInput[]>([]);
+  const [color, setColor] = useState("#818cf8");
 
   useEffect(() => {
     fetchProducts();
@@ -42,6 +44,9 @@ export function useProducts() {
     setOffsetDays(3);
     setNotificationGroup("");
     setMappings([]);
+    // 신규 등록 시 기존 색상을 피한 랜덤 색상 배정
+    const usedColors = products.map((p) => p.color).filter(Boolean);
+    setColor(getRandomProductColor(usedColors));
     setEditingProduct(null);
   };
 
@@ -53,6 +58,7 @@ export function useProducts() {
     setOffsetDays(product.offset_days);
     setNotificationGroup(product.notification_group || "");
     setMappings(product.mappings.map((m) => ({ channel: m.channel, external_id: m.external_id })));
+    setColor(product.color || "#818cf8");
     setDialogOpen(true);
   };
 
@@ -71,11 +77,12 @@ export function useProducts() {
       offset_days: offsetDays,
       notification_group: notificationGroup || null,
       mappings: mappings.filter((m) => m.external_id.trim()),
+      color,
     };
 
     try {
       if (editingProduct) {
-        await apiPut(`/api/products/${editingProduct.id}`, payload);
+        await apiPatch(`/api/products/${editingProduct.id}`, payload);  // ← apiPut → apiPatch
         toast.success("상품이 수정되었습니다.");
       } else {
         await apiPost("/api/products", payload);
@@ -88,6 +95,7 @@ export function useProducts() {
       toast.error("저장에 실패했습니다.");
     }
   };
+
 
   const handleDelete = async (id: number) => {
     if (!confirm("정말 삭제하시겠습니까?")) return;
@@ -104,6 +112,7 @@ export function useProducts() {
     products, loading: storeLoading, dialogOpen, setDialogOpen, editingProduct,
     productName, setProductName, offsetDays, setOffsetDays,
     notificationGroup, setNotificationGroup,
+    color, setColor,
     mappings, addMapping, removeMapping, updateMapping,
     openCreateDialog, openEditDialog, handleSubmit, handleDelete,
   };

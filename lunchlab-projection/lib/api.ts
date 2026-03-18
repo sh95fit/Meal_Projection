@@ -46,3 +46,13 @@ export class ApiError extends Error {
     return data as T;
   }
   
+  export async function apiPatch<T>(url: string, body: unknown): Promise<T> {
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new ApiError(data.error || "요청에 실패했습니다.", res.status);
+    return data as T;
+  }
