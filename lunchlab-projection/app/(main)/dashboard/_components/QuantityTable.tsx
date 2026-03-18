@@ -1,4 +1,4 @@
-// app/(main)/dashboard/_components/QuantityTable.tsx
+// app/(main)/dashboard/_components/QuantityTable.tsx (전체 교체)
 "use client";
 
 import {
@@ -11,6 +11,14 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import type { QuantityClient, ViewScope } from "@/types/dashboard";
+
+// ─── 상품 항목 타입 (QuantityClient.products 요소) ───
+type QtyProduct = {
+  productName: string;
+  lastWeekQty: number;
+  thisWeekQty: number;
+  diff: number;
+};
 
 interface Props {
   clients: QuantityClient[];
@@ -63,7 +71,7 @@ export function QuantityTable({ clients, scope, onClientClick }: Props) {
                   </TableCell>
                   <TableCell>
                     <div className="space-y-0.5">
-                      {c.products.map((p) => {
+                      {c.products.map((p: QtyProduct) => {
                         const highlight = Math.abs(p.diff) >= 3;
                         const cls =
                           p.diff > 0
@@ -170,7 +178,11 @@ export function QuantityTable({ clients, scope, onClientClick }: Props) {
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {c.products
-                    .map((p) => `${p.productName}(${p.thisWeekQty})`)
+                    .map((p: QtyProduct) => {
+                      const diff = p.diff;
+                      const prefix = diff > 0 ? "+" : "";
+                      return `${p.productName} ${p.lastWeekQty}→${p.thisWeekQty} (${prefix}${diff})`;
+                    })
                     .join(", ")}
                 </TableCell>
               </TableRow>

@@ -214,6 +214,31 @@ export interface DrilldownDetailResponse {
   quantityClients: QuantityAnomalyClient[];
 }
 
+/**
+ * 수량 기준 특이 고객사 — QuantityTable 컴포넌트용
+ * (DrilldownDetailSection 내부의 QuantityAnomalyClient와 별도)
+ *
+ * - accountId    : accounts.id
+ * - accountName  : 고객사명
+ * - totalLast    : 전주 총 수량
+ * - totalThis    : 금주 총 수량
+ * - totalDiff    : totalThis - totalLast
+ * - products     : 상품별 상세 변동
+ */
+export interface QuantityClient {
+  accountId: number;
+  accountName: string;
+  totalLast: number;
+  totalThis: number;
+  totalDiff: number;
+  products: {
+    productName: string;
+    lastWeekQty: number;
+    thisWeekQty: number;
+    diff: number;
+  }[];
+}
+
 // ─── [E] 고객 변동 섹션 ──────────────────────────────────────────
 
 /**
