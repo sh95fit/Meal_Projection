@@ -1,18 +1,14 @@
-// ──────────────────────────────────────────────────────────────────
-// app/(main)/dashboard/page.tsx
-// 대시보드 메인 페이지 — 4개 섹션을 배치하고 기간 필터를 제공합니다.
-// ──────────────────────────────────────────────────────────────────
+// app/(main)/dashboard/page.tsx (전체 교체)
 "use client";
 
 import { useDashboard } from "./_hooks/useDashboard";
 import { RealtimeSection } from "./_components/RealtimeSection";
 import { TrendChartSection } from "./_components/TrendChartSection";
-import { DrilldownSection } from "./_components/DrilldownSection";
+import { DrilldownDetailSection } from "./_components/DrilldownDetailSection";
 import { ClientChangeSection } from "./_components/ClientChangeSection";
 import { Button } from "@/components/ui/button";
 import type { PeriodPreset } from "@/types/dashboard";
 
-/** 기간 프리셋 버튼 목록 */
 const PRESET_OPTIONS: { label: string; value: PeriodPreset }[] = [
   { label: "올해", value: "year" },
   { label: "7일", value: "7d" },
@@ -22,13 +18,15 @@ const PRESET_OPTIONS: { label: string; value: PeriodPreset }[] = [
 
 export default function DashboardPage() {
   const {
-    realtime, trend, drilldown, clients,
+    realtime, trend, clients,
+    realtimeDate, setRealtimeDate,
+    drilldownDetail, drilldownDate, drilldownOpen, drilldownLoading,
+    openDrilldown, closeDrilldown,
     loading, realtimeLoading,
     periodPreset, customStart, customEnd,
     setPeriodPreset, setCustomRange, refreshAll,
   } = useDashboard();
 
-  // ── 로딩 중 ──
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -47,7 +45,15 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {/* ── 기간 필터 ── */}
+      {/* ── 섹션 1: 실시간 현황 (자체 날짜 선택) ── */}
+      <RealtimeSection
+        data={realtime}
+        loading={realtimeLoading}
+        currentDate={realtimeDate}
+        onDateChange={setRealtimeDate}
+      />
+
+      {/* ── 기간 필터 (추이 차트 · 고객 변동용) ── */}
       <div className="flex items-center gap-2 flex-wrap">
         {PRESET_OPTIONS.map((opt) => (
           <Button
@@ -59,8 +65,6 @@ export default function DashboardPage() {
             {opt.label}
           </Button>
         ))}
-
-        {/* 커스텀 날짜 입력 */}
         <div className="flex items-center gap-1 ml-2">
           <input
             type="date"
@@ -78,14 +82,22 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── 섹션 1: 실시간 현황 ── */}
-      <RealtimeSection data={realtime} loading={realtimeLoading} />
-
       {/* ── 섹션 2: 추이 차트 ── */}
-      <TrendChartSection data={trend} />
+      <TrendChartSection
+        data={trend}
+        onBarClick={openDrilldown}
+        activeDate={drilldownDate}
+      />
 
-      {/* ── 섹션 3: 특이 고객사 드릴다운 ── */}
-      <DrilldownSection data={drilldown} />
+      {/* ── 섹션 3: 드릴다운 상세 ── */}
+      {drilldownOpen && (
+        <DrilldownDetailSection
+          data={drilldownDetail}
+          date={drilldownDate}
+          loading={drilldownLoading}
+          onClose={closeDrilldown}
+        />
+      )}
 
       {/* ── 섹션 4: 고객 변동 현황 ── */}
       <ClientChangeSection data={clients} />

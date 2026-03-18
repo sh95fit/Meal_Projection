@@ -1,27 +1,52 @@
+// ──────────────────────────────────────────────────────────────────
+// app/api/products/route.ts
+// 상품 목록 조회 / 신규 등록
+// ──────────────────────────────────────────────────────────────────
 import { NextRequest, NextResponse } from "next/server";
-import { getProducts, createProduct } from "@/lib/repositories/productRepository";
+import { requireAuth } from "@/lib/services/authService";
+import { getAllProductsWithMappings, createProduct } from "@/lib/repositories/productRepository";
 
+/** GET /api/products */
 export async function GET() {
   try {
-    const products = await getProducts();
+    await requireAuth();
+    const products = await getAllProductsWithMappings();
     return NextResponse.json(products);
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Unknown error" },
-      { status: 500 }
-    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal Server Error";
+    if (message === "Unauthorized") {
+      return NextResponse.json({ error: message }, { status: 401 });
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
+/** POST /api/products — 동일 */
 export async function POST(request: NextRequest) {
   try {
+    await requireAuth();
     const body = await request.json();
-    const product = await createProduct(body);
+
+    if (!body.product_name || typeof body.product_name !== "string") {
+      return NextResponse.json(
+        { error: "product_name은 필수입니다." },
+        { status: 400 }
+      );
+    }
+
+    const product = await createProduct({
+      product_name: body.product_name,
+      offset_days: body.offset_days,
+      notification_group: body.notification_group,
+      color: body.color,
+    });
+
     return NextResponse.json(product, { status: 201 });
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Unknown error" },
-      { status: 500 }
-    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal Server Error";
+    if (message === "Unauthorized") {
+      return NextResponse.json({ error: message }, { status: 401 });
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

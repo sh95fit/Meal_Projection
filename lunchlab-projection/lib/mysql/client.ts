@@ -112,7 +112,8 @@ function getDirectPool(): mysql.Pool {
       password: process.env.DB_PASSWORD!,
       database: process.env.DB_ORDER_SERVICE || "order_service",
       waitForConnections: true,
-      connectionLimit: 5,
+      connectionLimit: 10,
+      queueLimit: 50, 
       idleTimeout: 60000,       // 60초 동안 안 쓰면 연결 해제
       enableKeepAlive: true,
       keepAliveInitialDelay: 10000,
@@ -121,18 +122,52 @@ function getDirectPool(): mysql.Pool {
   return directPool;
 }
 
+// ─── 동시 실행 제어를 위한 세마포어 ───
+class Semaphore {
+  private queue: (() => void)[] = [];
+  private running = 0;
+  constructor(private max: number) {}
+
+  async acquire(): Promise<void> {
+    if (this.running < this.max) {
+      this.running++;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(() => {
+        this.running++;
+        resolve();
+      });
+    });
+  }
+
+  release(): void {
+    this.running--;
+    if (this.queue.length > 0) {
+      const next = this.queue.shift()!;
+      next();
+    }
+  }
+}
+
 // ─── 공개 API ───
 
 const useSSH = !!(process.env.SSH_HOST && (process.env.SSH_PRIVATE_KEY || process.env.SSH_KEY_PATH));
+const querySemaphore = new Semaphore(useSSH ? 3 : 8);
 
 export async function queryMySQL<T = RowDataPacket>(
   sql: string,
   params?: unknown[]
 ): Promise<T[]> {
-  if (useSSH) {
-    return queryViaSSH<T>(sql, params);
-  } else {
-    return queryDirect<T>(sql, params);
+  await querySemaphore.acquire();
+  try {
+    if (useSSH) {
+      return await queryViaSSH<T>(sql, params);
+    } else {
+      return await queryDirect<T>(sql, params);
+    }
+  } finally {
+    querySemaphore.release();
   }
 }
 
