@@ -10,26 +10,19 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import type { QuantityClient, ViewScope } from "@/types/dashboard";
-
-// ─── 상품 항목 타입 (QuantityClient.products 요소) ───
-type QtyProduct = {
-  productName: string;
-  lastWeekQty: number;
-  thisWeekQty: number;
-  diff: number;
-};
+import type { QuantityClient, ProductChip, ViewScope } from "@/types/dashboard";
 
 interface Props {
   clients: QuantityClient[];
   scope: ViewScope;
-  onClientClick: (accountId: number) => void;
+  productChips: ProductChip[];
+  onClientClick?: (accountId: number) => void;
 }
 
-export function QuantityTable({ clients, scope, onClientClick }: Props) {
+export function QuantityTable({ clients, scope, productChips, onClientClick }: Props) {
   if (clients.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground py-4">
+      <p className="text-sm text-muted-foreground py-4 text-center">
         수량 변동 특이 고객사가 없습니다.
       </p>
     );
@@ -52,34 +45,26 @@ export function QuantityTable({ clients, scope, onClientClick }: Props) {
           <TableBody>
             {clients.map((c) => {
               const tCls =
-                c.totalDiff > 0
-                  ? "text-green-600"
-                  : c.totalDiff < 0
-                    ? "text-red-600"
-                    : "";
+                c.totalDiff > 0 ? "text-green-600" : c.totalDiff < 0 ? "text-red-600" : "";
               const tArrow =
                 c.totalDiff > 0 ? "▲" : c.totalDiff < 0 ? "▼" : "";
 
               return (
                 <TableRow
                   key={c.accountId}
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => onClientClick(c.accountId)}
+                  className={onClientClick ? "cursor-pointer hover:bg-gray-50" : "hover:bg-gray-50"}
+                  onClick={() => onClientClick?.(c.accountId)}
                 >
-                  <TableCell className="font-semibold">
-                    {c.accountName}
-                  </TableCell>
+                  <TableCell className="font-semibold">{c.accountName}</TableCell>
                   <TableCell>
                     <div className="space-y-0.5">
-                      {c.products.map((p: QtyProduct) => {
+                      {c.products.map((p) => {
                         const highlight = Math.abs(p.diff) >= 3;
+                        const chip = productChips.find((ch) => ch.productName === p.productName);
+                        const color = chip?.color ?? "#6b7280";
                         const cls =
-                          p.diff > 0
-                            ? "text-green-600"
-                            : p.diff < 0
-                              ? "text-red-600"
-                              : "";
-                        const ar = p.diff > 0 ? "▲" : p.diff < 0 ? "▼" : "";
+                          p.diff > 0 ? "text-green-600" : p.diff < 0 ? "text-red-600" : "";
+                        const prefix = p.diff > 0 ? "+" : "";
 
                         return (
                           <div
@@ -88,20 +73,16 @@ export function QuantityTable({ clients, scope, onClientClick }: Props) {
                               highlight ? "font-bold" : "opacity-50"
                             }`}
                           >
-                            <span className="w-14 truncate">
-                              {p.productName}
-                            </span>
-                            <span className="w-6 text-right">
-                              {p.lastWeekQty}
-                            </span>
-                            <span className="text-muted-foreground">→</span>
-                            <span className="w-6 text-right">
-                              {p.thisWeekQty}
-                            </span>
                             <span
-                              className={`w-10 text-right font-bold ${cls}`}
-                            >
-                              {ar} {Math.abs(p.diff)}
+                              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: color }}
+                            />
+                            <span className="w-14 truncate">{p.productName}</span>
+                            <span className="text-gray-500">{p.lastWeekQty}</span>
+                            <span className="text-muted-foreground">→</span>
+                            <span className="text-gray-700">{p.thisWeekQty}</span>
+                            <span className={`font-bold ${cls}`}>
+                              ({prefix}{p.diff})
                             </span>
                             {highlight && (
                               <Badge
@@ -141,33 +122,25 @@ export function QuantityTable({ clients, scope, onClientClick }: Props) {
             <TableHead className="text-right">금주 총수량</TableHead>
             <TableHead className="text-right">변화</TableHead>
             <TableHead className="text-right">변화율</TableHead>
-            <TableHead>주문 상품</TableHead>
+            <TableHead className="pl-6">주문 상품</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {clients.map((c) => {
             const cls =
-              c.totalDiff > 0
-                ? "text-green-600"
-                : c.totalDiff < 0
-                  ? "text-red-600"
-                  : "";
+              c.totalDiff > 0 ? "text-green-600" : c.totalDiff < 0 ? "text-red-600" : "";
             const arrow =
               c.totalDiff > 0 ? "▲" : c.totalDiff < 0 ? "▼" : "";
             const rate =
-              c.totalLast > 0
-                ? Math.round((c.totalDiff / c.totalLast) * 100)
-                : "—";
+              c.totalLast > 0 ? Math.round((c.totalDiff / c.totalLast) * 100) : "—";
 
             return (
               <TableRow
                 key={c.accountId}
-                className="cursor-pointer hover:bg-gray-50"
-                onClick={() => onClientClick(c.accountId)}
+                className={onClientClick ? "cursor-pointer hover:bg-gray-50" : "hover:bg-gray-50"}
+                onClick={() => onClientClick?.(c.accountId)}
               >
-                <TableCell className="font-semibold">
-                  {c.accountName}
-                </TableCell>
+                <TableCell className="font-semibold">{c.accountName}</TableCell>
                 <TableCell className="text-right">{c.totalLast}</TableCell>
                 <TableCell className="text-right">{c.totalThis}</TableCell>
                 <TableCell className={`text-right font-bold ${cls}`}>
@@ -176,14 +149,37 @@ export function QuantityTable({ clients, scope, onClientClick }: Props) {
                 <TableCell className={`text-right ${cls}`}>
                   {typeof rate === "number" ? `${rate}%` : rate}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {c.products
-                    .map((p: QtyProduct) => {
+                {/* ★ 상품명 전주→금주 (±차이) 형태 */}
+                <TableCell className="pl-6">
+                  <div className="flex flex-wrap gap-1.5">
+                    {c.products.map((p) => {
+                      const chip = productChips.find((ch) => ch.productName === p.productName);
+                      const color = chip?.color ?? "#6b7280";
                       const diff = p.diff;
-                      const prefix = diff > 0 ? "+" : "";
-                      return `${p.productName} ${p.lastWeekQty}→${p.thisWeekQty} (${prefix}${diff})`;
-                    })
-                    .join(", ")}
+                      const diffColor =
+                        diff > 0 ? "text-blue-600" : diff < 0 ? "text-red-600" : "text-gray-400";
+                      const diffPrefix = diff > 0 ? "+" : "";
+
+                      return (
+                        <span
+                          key={p.productName}
+                          className="inline-flex items-center gap-1 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5"
+                        >
+                          <span
+                            className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: color }}
+                          />
+                          {p.productName}
+                          <span className="text-gray-500">{p.lastWeekQty}</span>
+                          <span className="text-gray-400">→</span>
+                          <span className="text-gray-700 font-medium">{p.thisWeekQty}</span>
+                          <span className={`font-medium ${diffColor}`}>
+                            ({diffPrefix}{diff})
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
                 </TableCell>
               </TableRow>
             );

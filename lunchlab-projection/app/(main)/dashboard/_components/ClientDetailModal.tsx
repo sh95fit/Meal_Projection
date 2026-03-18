@@ -115,11 +115,11 @@ export function ClientDetailModal({ open, loading, data, onClose }: Props) {
                   />
                   <YAxis tick={{ fontSize: 10 }} />
                   <Tooltip
-                    labelFormatter={(label: string) => `날짜: ${label}`}
-                    formatter={(value: number) => [
-                      `${value}식`,
-                      "주문량",
-                    ]}
+                    labelFormatter={(label) => String(label ?? "")}
+                    formatter={(value) => {
+                      if (Array.isArray(value)) return value.join(", ");
+                      return [value != null ? Number(value).toLocaleString() : "0", "수량"];
+                    }}
                   />
                   <Bar
                     dataKey="qty"

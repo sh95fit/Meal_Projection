@@ -25,7 +25,7 @@ interface Props {
   onPresetChange: (p: PeriodPreset) => void;
   onCustomRangeChange: (start: string, end: string) => void;
   onDowScopeChange: (s: ViewScope) => void;
-  onClientClick: (accountId: string) => void;
+  onClientClick: (accountId: number) => void;
 }
 
 export function ClientChangeSection({

@@ -208,3 +208,33 @@ export async function deleteProduct(id: number): Promise<Product> {
   if (error) throw new Error(error.message);
   return data;
 }
+
+
+// ──────────────────────────────────────────────────────────────────
+// G. 상품 ID 매핑 조회 (orderQueryRepository용)
+// ──────────────────────────────────────────────────────────────────
+
+export interface ProductMapping {
+  id: number;
+  product_id: number;
+  channel: "web" | "app";
+  external_id: string;
+}
+
+/** 특정 상품의 채널별 외부 ID 매핑 목록 조회 */
+export async function getProductMappings(productId: number): Promise<ProductMapping[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("product_id_mappings")
+    .select("id, product_id, channel, external_id")
+    .eq("product_id", productId);
+
+  if (error) throw new Error(error.message);
+
+  return (data || []).map((m: Record<string, unknown>) => ({
+    id: Number(m.id),
+    product_id: Number(m.product_id),
+    channel: m.channel as "web" | "app",
+    external_id: String(m.external_id),
+  }));
+}
