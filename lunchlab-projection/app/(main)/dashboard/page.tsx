@@ -52,7 +52,7 @@ export default function DashboardPage() {
       />
 
       {/* ── 섹션 3: 드릴다운 상세 ── */}
-      {h.drilldownOpen && (
+      {h.drilldownOpen && h.drilldownDate && (
         <DrilldownDetailSection
           data={h.drilldownDetail}
           date={h.drilldownDate}

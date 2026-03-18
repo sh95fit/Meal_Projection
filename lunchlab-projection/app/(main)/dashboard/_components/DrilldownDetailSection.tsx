@@ -3,15 +3,15 @@
 
 import { useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, X } from "lucide-react";
+// ★ 외부 컴포넌트 import (인라인 정의 제거)
+import { WeekdayTable } from "./WeekdayTable";
+import { QuantityTable } from "./QuantityTable";
 import type {
   DrilldownDetailResponse,
-  WeekdayCaseClient,
-  QuantityAnomalyClient,
-  ProductChip,
   ViewScope,
+  QuantityClient,
 } from "@/types/dashboard";
 
 // ─── Props ───
@@ -22,7 +22,6 @@ interface Props {
   onClose: () => void;
 }
 
-// ─── 필터 타입 ───
 type WeekdayFilter = "all" | "lapsed" | "new" | "unassigned";
 
 // ─── 필터 탭 (색상 통일: 검은색 계열) ───
@@ -55,241 +54,23 @@ function FilterTab({
   );
 }
 
-// ─── 케이스 뱃지 (이탈=빨강, 신규=파랑, 미지정=회색 유지) ───
-function CaseBadge({ caseType }: { caseType: string }) {
-  switch (caseType) {
-    case "lapsed":
-      return (
-        <Badge variant="outline" className="text-red-600 border-red-300 bg-red-50 text-[10px]">
-          이탈
-        </Badge>
-      );
-    case "new":
-      return (
-        <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50 text-[10px]">
-          신규
-        </Badge>
-      );
-    case "unassigned":
-    default:
-      return (
-        <Badge variant="outline" className="text-gray-500 border-gray-300 bg-gray-50 text-[10px]">
-          미지정
-        </Badge>
-      );
-  }
-}
-
-// ─── 차이 셀 (null-safe) ───
-function DiffCell({ value }: { value: number | null | undefined }) {
-  const num = value ?? 0;
-  if (num === 0) return <span className="text-gray-400">-</span>;
-  const color = num > 0 ? "text-blue-600" : "text-red-600";
-  const prefix = num > 0 ? "+" : "";
-  return <span className={`font-medium ${color}`}>{prefix}{num}</span>;
-}
-
-// ─── 변화율 셀 (null-safe) ───
-function RateCell({ value }: { value: number | null | undefined }) {
-  const num = value ?? 0;
-  if (num === 0) return <span className="text-gray-400">-</span>;
-  const color = num > 0 ? "text-blue-600" : "text-red-600";
-  const prefix = num > 0 ? "+" : "";
-  return <span className={`text-xs ${color}`}>{prefix}{num.toFixed(1)}%</span>;
-}
-
-// ─── 서머리 카드 ───
 function SummaryCard({
   label,
   value,
   className,
-  tooltip,
 }: {
   label: string;
   value: string | number;
   className?: string;
-  tooltip?: string;
 }) {
   return (
-    <div
-      className={`rounded-lg border p-3 text-center ${className ?? ""}`}
-      title={tooltip}
-    >
+    <div className={`rounded-lg border p-3 text-center ${className ?? ""}`}>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-xl font-bold mt-1">{value}</p>
     </div>
   );
 }
 
-// ─── 상품 목록 (색상 마커 포함) ───
-function ProductList({
-  products,
-  productChips,
-}: {
-  products: { productName: string; qty: number }[];
-  productChips: ProductChip[];
-}) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {products.map((p) => {
-        const chip = productChips.find((c) => c.productName === p.productName);
-        const color = chip?.color ?? "#6b7280";
-        return (
-          <span
-            key={p.productName}
-            className="inline-flex items-center gap-1 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5"
-          >
-            <span
-              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
-              style={{ backgroundColor: color }}
-            />
-            {p.productName}
-            <span className="text-gray-400 font-medium">{p.qty}</span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── 요일 기준 테이블 ───
-function WeekdayTable({
-  clients,
-  filter,
-  productChips,
-}: {
-  clients: WeekdayCaseClient[];
-  filter: WeekdayFilter;
-  productChips: ProductChip[];
-}) {
-  const filtered =
-    filter === "all" ? clients : clients.filter((c) => c.case === filter);
-
-  if (filtered.length === 0) {
-    return <p className="text-sm text-gray-400 py-4 text-center">해당 항목이 없습니다.</p>;
-  }
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-gray-500">
-            <th className="py-2 pr-3 font-medium">구분</th>
-            <th className="py-2 pr-3 font-medium">고객사</th>
-            <th className="py-2 pr-3 font-medium text-right">전주</th>
-            <th className="py-2 pr-3 font-medium text-right">금주</th>
-            <th className="py-2 pr-3 font-medium text-right">차이</th>
-            <th className="py-2 pr-3 font-medium text-right">변화율</th>
-            <th className="py-2 pl-6 font-medium">주문 상품</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((client) => (
-            <tr key={client.accountId} className="border-b last:border-0 hover:bg-gray-50">
-              <td className="py-2.5 pr-3">
-                <CaseBadge caseType={client.case} />
-              </td>
-              <td className="py-2.5 pr-3 font-medium">{client.accountName}</td>
-              <td className="py-2.5 pr-3 text-right">{client.lastWeekQty}</td>
-              <td className="py-2.5 pr-3 text-right">{client.thisWeekQty}</td>
-              <td className="py-2.5 pr-3 text-right">
-                <DiffCell value={client.diff} />
-              </td>
-              <td className="py-2.5 pr-3 text-right">
-                <RateCell value={client.changeRate} />
-              </td>
-              <td className="py-2.5 pl-6">
-                <ProductList products={client.products} productChips={productChips} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ─── 수량 기준 테이블 ───
-function QuantityTable({
-  clients,
-  productChips,
-}: {
-  clients: QuantityAnomalyClient[];
-  productChips: ProductChip[];
-}) {
-  if (clients.length === 0) {
-    return <p className="text-sm text-gray-400 py-4 text-center">해당 항목이 없습니다.</p>;
-  }
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-gray-500">
-            <th className="py-2 pr-3 font-medium">방향</th>
-            <th className="py-2 pr-3 font-medium">고객사</th>
-            <th className="py-2 pr-3 font-medium text-right">전주</th>
-            <th className="py-2 pr-3 font-medium text-right">금주</th>
-            <th className="py-2 pr-3 font-medium text-right">차이</th>
-            <th className="py-2 pr-3 font-medium text-right">변화율</th>
-            <th className="py-2 pl-6 font-medium">상품별 변동</th>
-          </tr>
-        </thead>
-        <tbody>
-          {clients.map((client) => (
-            <tr key={client.accountId} className="border-b last:border-0 hover:bg-gray-50">
-              <td className="py-2.5 pr-3">
-                <Badge
-                  variant="outline"
-                  className={`text-[10px] ${
-                    client.direction === "up"
-                      ? "text-blue-600 border-blue-300 bg-blue-50"
-                      : "text-red-600 border-red-300 bg-red-50"
-                  }`}
-                >
-                  {client.direction === "up" ? "▲ 증가" : "▼ 감소"}
-                </Badge>
-              </td>
-              <td className="py-2.5 pr-3 font-medium">{client.accountName}</td>
-              <td className="py-2.5 pr-3 text-right">{client.lastWeekQty}</td>
-              <td className="py-2.5 pr-3 text-right">{client.thisWeekQty}</td>
-              <td className="py-2.5 pr-3 text-right">
-                <DiffCell value={client.diff} />
-              </td>
-              <td className="py-2.5 pr-3 text-right">
-                <RateCell value={client.changeRate} />
-              </td>
-              <td className="py-2.5 pl-6">
-                <div className="flex flex-wrap gap-1.5">
-                  {client.products.map((p) => {
-                    const chip = productChips.find((c) => c.productName === p.productName);
-                    const color = chip?.color ?? "#6b7280";
-                    return (
-                      <span
-                        key={p.productName}
-                        className="inline-flex items-center gap-1 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5"
-                      >
-                        <span
-                          className="inline-block w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: color }}
-                        />
-                        {p.productName}
-                        <DiffCell value={p.diff} />
-                      </span>
-                    );
-                  })}
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════
-// 메인 컴포넌트
 // ═══════════════════════════════════════════════
 export function DrilldownDetailSection({ data, date, loading, onClose }: Props) {
   const [weekdayFilter, setWeekdayFilter] = useState<WeekdayFilter>("all");
@@ -309,15 +90,23 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
 
   if (!data) return null;
 
-  // ★ 수량 기준 이상치 필터링:
-  //   1) 요일 기준 테이블에 이미 표시된 고객사 제외
-  //   2) |diff| >= 3 인 고객사만 표시
-  const weekdayAccountIds = new Set(
-    data.weekdayClients.map((c) => c.accountId),
-  );
-  const filteredQuantityClients = data.quantityClients.filter(
-    (c) => !weekdayAccountIds.has(c.accountId) && Math.abs(c.diff ?? 0) >= 3,
-  );
+  // ★ 수량 기준 이상치 필터링: 요일 기준 고객 제외 + |diff| >= 3
+  const weekdayAccountIds = new Set(data.weekdayClients.map((c) => c.accountId));
+  const filteredQuantityClients: QuantityClient[] = data.quantityClients
+    .filter((c) => !weekdayAccountIds.has(c.accountId) && Math.abs(c.diff ?? 0) >= 3)
+    .map((c) => ({
+      accountId: c.accountId,
+      accountName: c.accountName,
+      totalLast: c.lastWeekQty,
+      totalThis: c.thisWeekQty,
+      totalDiff: c.diff,
+      products: c.products.map((p) => ({
+        productName: p.productName,
+        lastWeekQty: p.lastWeek,
+        thisWeekQty: p.thisWeek,
+        diff: p.diff,
+      })),
+    }));
 
   return (
     <Card>
@@ -390,7 +179,6 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {/* 필터 탭 (검은색 통일) */}
             <div className="flex items-center gap-2 flex-wrap">
               <FilterTab
                 label="전체"
@@ -418,15 +206,17 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
               />
             </div>
 
+            {/* ★ 외부 WeekdayTable 컴포넌트 사용 */}
             <WeekdayTable
               clients={data.weekdayClients}
               filter={weekdayFilter}
+              scope={weekdayScope}
               productChips={data.productChips}
             />
           </CardContent>
         </Card>
 
-        {/* ── 수량 기준 이상치 (요일 기준 고객 제외, 차이 ±3 이상) ── */}
+        {/* ── 수량 기준 이상치 ── */}
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -452,8 +242,10 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
             </div>
           </CardHeader>
           <CardContent>
+            {/* ★ 외부 QuantityTable 컴포넌트 사용 */}
             <QuantityTable
               clients={filteredQuantityClients}
+              scope={qtyScope}
               productChips={data.productChips}
             />
           </CardContent>

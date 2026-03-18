@@ -1,5 +1,5 @@
 import { queryMySQL } from "@/lib/mysql/client";
-import { getProductMappings } from "./productRepository";
+import { getProductMappings, type ProductMapping } from "./productRepository";
 import type { OrderSummaryRow, UnorderedAccountRow } from "@/types";
 
 // ─── 헬퍼: product mapping → SQL CASE 표현식 ───
@@ -29,8 +29,8 @@ export async function getOrderSummary(
     throw new Error("No product ID mappings found");
   }
 
-  const webIds = mappings.filter((m) => m.channel === "web").map((m) => m.external_id);
-  const appIds = mappings.filter((m) => m.channel === "app").map((m) => m.external_id);
+  const webIds = mappings.filter((m: ProductMapping) => m.channel === "web").map((m: ProductMapping) => m.external_id);
+  const appIds = mappings.filter((m: ProductMapping) => m.channel === "app").map((m: ProductMapping) => m.external_id);
 
   const webCaseExpr = buildWebCaseExpr(webIds);
   const appCaseExpr = buildAppCaseExpr(appIds);
@@ -268,8 +268,8 @@ export async function getUnorderedAccounts(
   const mappings = await getProductMappings(productId);
 
   const webIds = (mappings || [])
-    .filter((m) => m.channel === "web")
-    .map((m) => m.external_id);
+    .filter((m: ProductMapping) => m.channel === "web")
+    .map((m: ProductMapping) => m.external_id);
 
   const productCaseExpr = buildWebCaseExpr(webIds);
 
