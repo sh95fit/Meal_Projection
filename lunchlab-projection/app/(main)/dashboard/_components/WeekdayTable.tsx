@@ -1,22 +1,10 @@
 // app/(main)/dashboard/_components/WeekdayTable.tsx (전체 교체)
 "use client";
 
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-// ★ WeekdayClient → WeekdayCaseClient, WeekdayCase 타입 수정
 import type { WeekdayCaseClient, WeekdayCase, ProductChip, ViewScope } from "@/types/dashboard";
 
-// ★ filter에 "all" 포함하는 별도 유니온
 type WeekdayFilter = WeekdayCase | "all";
-
-// 상품 항목 타입
 type WeekdayProduct = { productName: string; qty: number };
 
 interface Props {
@@ -67,8 +55,12 @@ function RateCell({ value }: { value: number | null | undefined }) {
   return <span className={`text-xs ${color}`}>{prefix}{num.toFixed(1)}%</span>;
 }
 
+const thClass = "py-2 px-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap";
+const thRight = "py-2 px-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap";
+const tdClass = "py-2.5 px-3";
+const tdRight = "py-2.5 px-3 text-right";
+
 export function WeekdayTable({ clients, filter, scope, productChips, onClientClick }: Props) {
-  // ★ filter === "all" 비교가 가능하도록 WeekdayFilter 유니온 사용
   const filtered =
     filter === "all" ? clients : clients.filter((c) => c.case === filter);
 
@@ -78,30 +70,29 @@ export function WeekdayTable({ clients, filter, scope, productChips, onClientCli
 
   if (scope === "product") {
     return (
-      <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>구분</TableHead>
-              <TableHead>고객사</TableHead>
-              <TableHead>상품별 전주 → 금주</TableHead>
-              <TableHead className="text-right">총 전주</TableHead>
-              <TableHead className="text-right">총 금주</TableHead>
-              <TableHead className="text-right">차이</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+      <div className="overflow-auto max-h-[420px] border rounded-md">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-white z-10 border-b">
+            <tr>
+              <th className={thClass}>구분</th>
+              <th className={thClass}>고객사</th>
+              <th className={thClass}>상품별 전주 → 금주</th>
+              <th className={thRight}>총 전주</th>
+              <th className={thRight}>총 금주</th>
+              <th className={thRight}>차이</th>
+            </tr>
+          </thead>
+          <tbody>
             {filtered.map((client) => (
-              <TableRow
+              <tr
                 key={client.accountId}
-                className={onClientClick ? "cursor-pointer hover:bg-gray-50" : "hover:bg-gray-50"}
+                className={`border-b last:border-0 ${onClientClick ? "cursor-pointer" : ""} hover:bg-gray-50`}
                 onClick={() => onClientClick?.(client.accountId)}
               >
-                <TableCell><CaseBadge caseType={client.case} /></TableCell>
-                <TableCell className="font-semibold">{client.accountName}</TableCell>
-                <TableCell>
+                <td className={tdClass}><CaseBadge caseType={client.case} /></td>
+                <td className={`${tdClass} font-semibold`}>{client.accountName}</td>
+                <td className={tdClass}>
                   <div className="space-y-0.5">
-                    {/* ★ p 타입 명시 */}
                     {client.products.map((p: WeekdayProduct) => {
                       const chip = productChips.find((c) => c.productName === p.productName);
                       const color = chip?.color ?? "#6b7280";
@@ -117,49 +108,48 @@ export function WeekdayTable({ clients, filter, scope, productChips, onClientCli
                       );
                     })}
                   </div>
-                </TableCell>
-                <TableCell className="text-right">{client.lastWeekQty}</TableCell>
-                <TableCell className="text-right">{client.thisWeekQty}</TableCell>
-                <TableCell className="text-right"><DiffCell value={client.diff} /></TableCell>
-              </TableRow>
+                </td>
+                <td className={tdRight}>{client.lastWeekQty}</td>
+                <td className={tdRight}>{client.thisWeekQty}</td>
+                <td className={tdRight}><DiffCell value={client.diff} /></td>
+              </tr>
             ))}
-          </TableBody>
-        </Table>
+          </tbody>
+        </table>
       </div>
     );
   }
 
   /* ── 총 수량 모드 ── */
   return (
-    <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>구분</TableHead>
-            <TableHead>고객사</TableHead>
-            <TableHead className="text-right">전주</TableHead>
-            <TableHead className="text-right">금주</TableHead>
-            <TableHead className="text-right">차이</TableHead>
-            <TableHead className="text-right">변화율</TableHead>
-            <TableHead className="pl-6">주문 상품</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+    <div className="overflow-auto max-h-[420px] border rounded-md">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-white z-10 border-b">
+          <tr>
+            <th className={thClass}>구분</th>
+            <th className={thClass}>고객사</th>
+            <th className={thRight}>전주</th>
+            <th className={thRight}>금주</th>
+            <th className={thRight}>차이</th>
+            <th className={thRight}>변화율</th>
+            <th className={`${thClass} pl-6`}>주문 상품</th>
+          </tr>
+        </thead>
+        <tbody>
           {filtered.map((client) => (
-            <TableRow
+            <tr
               key={client.accountId}
-              className={onClientClick ? "cursor-pointer hover:bg-gray-50" : "hover:bg-gray-50"}
+              className={`border-b last:border-0 ${onClientClick ? "cursor-pointer" : ""} hover:bg-gray-50`}
               onClick={() => onClientClick?.(client.accountId)}
             >
-              <TableCell><CaseBadge caseType={client.case} /></TableCell>
-              <TableCell className="font-semibold">{client.accountName}</TableCell>
-              <TableCell className="text-right">{client.lastWeekQty}</TableCell>
-              <TableCell className="text-right">{client.thisWeekQty}</TableCell>
-              <TableCell className="text-right"><DiffCell value={client.diff} /></TableCell>
-              <TableCell className="text-right"><RateCell value={client.changeRate} /></TableCell>
-              <TableCell className="pl-6">
+              <td className={tdClass}><CaseBadge caseType={client.case} /></td>
+              <td className={`${tdClass} font-semibold`}>{client.accountName}</td>
+              <td className={tdRight}>{client.lastWeekQty}</td>
+              <td className={tdRight}>{client.thisWeekQty}</td>
+              <td className={tdRight}><DiffCell value={client.diff} /></td>
+              <td className={tdRight}><RateCell value={client.changeRate} /></td>
+              <td className={`${tdClass} pl-6`}>
                 <div className="flex flex-wrap gap-1.5">
-                  {/* ★ p 타입 명시 */}
                   {client.products.map((p: WeekdayProduct) => {
                     const chip = productChips.find((c) => c.productName === p.productName);
                     const color = chip?.color ?? "#6b7280";
@@ -169,7 +159,7 @@ export function WeekdayTable({ clients, filter, scope, productChips, onClientCli
                         className="inline-flex items-center gap-1 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5"
                       >
                         <span
-                          className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                          className="inline-block w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: color }}
                         />
                         {p.productName}
@@ -178,11 +168,11 @@ export function WeekdayTable({ clients, filter, scope, productChips, onClientCli
                     );
                   })}
                 </div>
-              </TableCell>
-            </TableRow>
+              </td>
+            </tr>
           ))}
-        </TableBody>
-      </Table>
+        </tbody>
+      </table>
     </div>
   );
 }

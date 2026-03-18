@@ -1,14 +1,6 @@
 // app/(main)/dashboard/_components/QuantityTable.tsx (전체 교체)
 "use client";
 
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import type { QuantityClient, ProductChip, ViewScope } from "@/types/dashboard";
 
@@ -18,6 +10,11 @@ interface Props {
   productChips: ProductChip[];
   onClientClick?: (accountId: number) => void;
 }
+
+const thClass = "py-2 px-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap";
+const thRight = "py-2 px-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap";
+const tdClass = "py-2.5 px-3";
+const tdRight = "py-2.5 px-3 text-right";
 
 export function QuantityTable({ clients, scope, productChips, onClientClick }: Props) {
   if (clients.length === 0) {
@@ -31,18 +28,18 @@ export function QuantityTable({ clients, scope, productChips, onClientClick }: P
   /* ── 상품별 모드: ±3 이상 강조 ── */
   if (scope === "product") {
     return (
-      <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>고객사</TableHead>
-              <TableHead>상품별 전주 → 금주 (±3 이상 강조)</TableHead>
-              <TableHead className="text-right">총 전주</TableHead>
-              <TableHead className="text-right">총 금주</TableHead>
-              <TableHead className="text-right">총 변화</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+      <div className="overflow-auto max-h-[420px] border rounded-md">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-white z-10 border-b">
+            <tr>
+              <th className={thClass}>고객사</th>
+              <th className={thClass}>상품별 전주 → 금주 (±3 이상 강조)</th>
+              <th className={thRight}>총 전주</th>
+              <th className={thRight}>총 금주</th>
+              <th className={thRight}>총 변화</th>
+            </tr>
+          </thead>
+          <tbody>
             {clients.map((c) => {
               const tCls =
                 c.totalDiff > 0 ? "text-green-600" : c.totalDiff < 0 ? "text-red-600" : "";
@@ -50,13 +47,13 @@ export function QuantityTable({ clients, scope, productChips, onClientClick }: P
                 c.totalDiff > 0 ? "▲" : c.totalDiff < 0 ? "▼" : "";
 
               return (
-                <TableRow
+                <tr
                   key={c.accountId}
-                  className={onClientClick ? "cursor-pointer hover:bg-gray-50" : "hover:bg-gray-50"}
+                  className={`border-b last:border-0 ${onClientClick ? "cursor-pointer" : ""} hover:bg-gray-50`}
                   onClick={() => onClientClick?.(c.accountId)}
                 >
-                  <TableCell className="font-semibold">{c.accountName}</TableCell>
-                  <TableCell>
+                  <td className={`${tdClass} font-semibold`}>{c.accountName}</td>
+                  <td className={tdClass}>
                     <div className="space-y-0.5">
                       {c.products.map((p) => {
                         const highlight = Math.abs(p.diff) >= 3;
@@ -96,36 +93,36 @@ export function QuantityTable({ clients, scope, productChips, onClientClick }: P
                         );
                       })}
                     </div>
-                  </TableCell>
-                  <TableCell className="text-right">{c.totalLast}</TableCell>
-                  <TableCell className="text-right">{c.totalThis}</TableCell>
-                  <TableCell className={`text-right font-bold ${tCls}`}>
+                  </td>
+                  <td className={tdRight}>{c.totalLast}</td>
+                  <td className={tdRight}>{c.totalThis}</td>
+                  <td className={`${tdRight} font-bold ${tCls}`}>
                     {tArrow} {Math.abs(c.totalDiff)}
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               );
             })}
-          </TableBody>
-        </Table>
+          </tbody>
+        </table>
       </div>
     );
   }
 
   /* ── 총 수량 모드 ── */
   return (
-    <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>고객사</TableHead>
-            <TableHead className="text-right">전주 총수량</TableHead>
-            <TableHead className="text-right">금주 총수량</TableHead>
-            <TableHead className="text-right">변화</TableHead>
-            <TableHead className="text-right">변화율</TableHead>
-            <TableHead className="pl-6">주문 상품</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+    <div className="overflow-auto max-h-[420px] border rounded-md">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-white z-10 border-b">
+          <tr>
+            <th className={thClass}>고객사</th>
+            <th className={thRight}>전주 총수량</th>
+            <th className={thRight}>금주 총수량</th>
+            <th className={thRight}>변화</th>
+            <th className={thRight}>변화율</th>
+            <th className={`${thClass} pl-6`}>주문 상품</th>
+          </tr>
+        </thead>
+        <tbody>
           {clients.map((c) => {
             const cls =
               c.totalDiff > 0 ? "text-green-600" : c.totalDiff < 0 ? "text-red-600" : "";
@@ -135,22 +132,21 @@ export function QuantityTable({ clients, scope, productChips, onClientClick }: P
               c.totalLast > 0 ? Math.round((c.totalDiff / c.totalLast) * 100) : "—";
 
             return (
-              <TableRow
+              <tr
                 key={c.accountId}
-                className={onClientClick ? "cursor-pointer hover:bg-gray-50" : "hover:bg-gray-50"}
+                className={`border-b last:border-0 ${onClientClick ? "cursor-pointer" : ""} hover:bg-gray-50`}
                 onClick={() => onClientClick?.(c.accountId)}
               >
-                <TableCell className="font-semibold">{c.accountName}</TableCell>
-                <TableCell className="text-right">{c.totalLast}</TableCell>
-                <TableCell className="text-right">{c.totalThis}</TableCell>
-                <TableCell className={`text-right font-bold ${cls}`}>
+                <td className={`${tdClass} font-semibold`}>{c.accountName}</td>
+                <td className={tdRight}>{c.totalLast}</td>
+                <td className={tdRight}>{c.totalThis}</td>
+                <td className={`${tdRight} font-bold ${cls}`}>
                   {arrow} {Math.abs(c.totalDiff)}
-                </TableCell>
-                <TableCell className={`text-right ${cls}`}>
+                </td>
+                <td className={`${tdRight} ${cls}`}>
                   {typeof rate === "number" ? `${rate}%` : rate}
-                </TableCell>
-                {/* ★ 상품명 전주→금주 (±차이) 형태 */}
-                <TableCell className="pl-6">
+                </td>
+                <td className={`${tdClass} pl-6`}>
                   <div className="flex flex-wrap gap-1.5">
                     {c.products.map((p) => {
                       const chip = productChips.find((ch) => ch.productName === p.productName);
@@ -180,12 +176,12 @@ export function QuantityTable({ clients, scope, productChips, onClientClick }: P
                       );
                     })}
                   </div>
-                </TableCell>
-              </TableRow>
+                </td>
+              </tr>
             );
           })}
-        </TableBody>
-      </Table>
+        </tbody>
+      </table>
     </div>
   );
 }
