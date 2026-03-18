@@ -2,109 +2,108 @@
 // app/api/dashboard/trend/route.ts
 // 추이 차트 API
 // ──────────────────────────────────────────────────────────────────
+
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/services/authService";
 import { getTrendData } from "@/lib/repositories/dashboardQueryRepository";
-import { getToday, addDays } from "@/lib/utils/date";
+import { getToday, addDays, isBusinessDay } from "@/lib/utils/date";
+import type { PeriodPreset } from "@/types/dashboard";
+
+/**
+ * 오늘 기준 N번째 영업일을 구합니다.
+ * (공휴일·일요일 제외)
+ *
+ * @param fromDate  기준일 "YYYY-MM-DD"
+ * @param n         몇 번째 영업일 (1 = 다음 영업일, 2 = 그 다음)
+ * @returns "YYYY-MM-DD"
+ */
+function getNthBusinessDayFrom(fromDate: string, n: number): string {
+  let cursor = fromDate;
+  let count = 0;
+  while (count < n) {
+    cursor = addDays(cursor, 1);
+    if (isBusinessDay(cursor)) {
+      count++;
+    }
+  }
+  return cursor;
+}
 
 /**
  * GET /api/dashboard/trend
  *
- * 쿼리 파라미터 (2가지 모드):
+ * 쿼리 파라미터:
+ *   - preset (optional) : 'year' | '7d' | '30d' | '90d'
+ *   - start  (optional) : 시작일 "YYYY-MM-DD" (custom 모드)
+ *   - end    (optional) : 종료일 "YYYY-MM-DD" (custom 모드)
  *
- *   [모드 A] preset 사용:
- *     - preset : 'year' | '7d' | '30d' | '90d'
- *       → 'year'  : 올해 1월 1일 ~ 오늘
- *       → '7d'    : 오늘 - 6일 ~ 오늘
- *       → '30d'   : 오늘 - 29일 ~ 오늘
- *       → '90d'   : 오늘 - 89일 ~ 오늘
+ * 종료일은 항상 오늘 +2 영업일까지 확장됩니다.
+ * (이미 주문이 접수되고 있는 미래 영업일 포함)
  *
- *   [모드 B] 커스텀 범위:
- *     - start : 시작일 "YYYY-MM-DD"
- *     - end   : 종료일 "YYYY-MM-DD"
- *
- *   preset이 있으면 start/end는 무시됩니다.
- *
- * 응답 (200):
- *   TrendResponse {
- *     productList: TrendProduct[],
- *     rows: TrendRow[]
- *   }
- *
- * 에러:
- *   - 400: start/end 누락 (preset도 없을 때)
- *   - 401: 인증 실패
- *   - 500: 서버 에러
+ * 응답 (200): TrendResponse
+ * 에러: 400 / 401 / 500
  */
 export async function GET(request: NextRequest) {
   try {
-    // ── 인증 확인 ──
     await requireAuth();
 
-    // ── 파라미터 파싱 ──
     const { searchParams } = new URL(request.url);
-    const preset = searchParams.get("preset");
+    const preset = searchParams.get("preset") as PeriodPreset | null;
+    const today = getToday();
+
+    // 종료일: 오늘 기준 +2 영업일
+    const endDate = getNthBusinessDayFrom(today, 2);
 
     let startDate: string;
-    let endDate: string;
 
     if (preset) {
       // ── 프리셋 모드 ──
-      // 프리셋에 따라 startDate/endDate를 자동 계산합니다.
-      const today = getToday();
-      endDate = today;
-
       switch (preset) {
-        case "year": {
-          // 올해 1월 1일 ~ 오늘
-          const year = today.split("-")[0];
-          startDate = `${year}-01-01`;
+        case "year":
+          startDate = `${today.slice(0, 4)}-01-01`;
           break;
-        }
         case "7d":
-          // 최근 7일 (오늘 포함)
           startDate = addDays(today, -6);
           break;
         case "30d":
-          // 최근 30일 (오늘 포함)
           startDate = addDays(today, -29);
           break;
         case "90d":
-          // 최근 90일 (오늘 포함)
           startDate = addDays(today, -89);
           break;
         default:
-          // 알 수 없는 프리셋 → 기본 90일
-          startDate = addDays(today, -89);
+          startDate = addDays(today, -6);
       }
     } else {
       // ── 커스텀 모드 ──
-      const start = searchParams.get("start");
-      const end = searchParams.get("end");
+      const customStart = searchParams.get("start");
+      const customEnd = searchParams.get("end");
 
-      if (!start || !end) {
+      if (!customStart) {
         return NextResponse.json(
-          { error: "preset 또는 start/end 파라미터가 필요합니다." },
+          { error: "start 파라미터가 필요합니다." },
           { status: 400 }
         );
       }
 
-      startDate = start;
-      endDate = end;
+      startDate = customStart;
+
+      // 커스텀 종료일이 지정되어도 +2 영업일까지는 보장
+      if (customEnd && customEnd > endDate) {
+        // 사용자가 더 먼 미래를 지정한 경우 그대로 사용
+        const data = await getTrendData(startDate, customEnd);
+        return NextResponse.json(data);
+      }
     }
 
-    // ── 데이터 조회 ──
-    // getTrendData 내부에서 각 날짜마다 getOrdersByDate()를 호출하므로
-    // 날짜별 needsAppMenuMerge() 분기가 자동으로 적용됩니다.
-    // (과거 날짜는 웹만, 오늘 14:30 전이면 웹+앱 합산)
-    const result = await getTrendData(startDate, endDate);
-
-    return NextResponse.json(result);
+    const data = await getTrendData(startDate, endDate);
+    return NextResponse.json(data);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal Server Error";
     if (message === "Unauthorized") {
       return NextResponse.json({ error: message }, { status: 401 });
     }
+    console.error("[trend] Error:", err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
