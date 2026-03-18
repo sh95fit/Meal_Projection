@@ -11,6 +11,8 @@ import {
 import type { LabelProps, BarShapeProps, BarRectangleItem } from "recharts";
 import type { TrendResponse, TrendRow, PeriodPreset } from "@/types/dashboard";
 
+import { Loader2 } from "lucide-react";
+
 // ─── Props ───
 interface Props {
   data: TrendResponse | null;
@@ -23,15 +25,16 @@ interface Props {
   onPresetChange: (p: PeriodPreset) => void;
   onCustomRangeChange: (start: string, end: string) => void;
   onToggleProduct: (name: string) => void;
+  loading?: boolean; 
 }
 
-// ─── 프리셋 옵션 ("기간 지정" 추가) ───
+// ─── 프리셋 옵션 ───
 const TREND_PRESETS: { label: string; value: PeriodPreset }[] = [
-  { label: "올해",   value: "year" },
-  { label: "7일",    value: "7d" },
-  { label: "30일",   value: "30d" },
-  { label: "2개월",  value: "60d" },
-  { label: "90일",   value: "90d" },
+  { label: "올해",     value: "year" },
+  { label: "7일",      value: "7d" },
+  { label: "30일",     value: "30d" },
+  { label: "2개월",    value: "60d" },
+  { label: "90일",     value: "90d" },
   { label: "기간 지정", value: "custom" },
 ];
 
@@ -63,14 +66,7 @@ function TotalLabel(props: LabelProps): ReactElement | null {
   const y = (vb?.y ?? 0) - 8;
 
   return (
-    <text
-      x={x}
-      y={y}
-      textAnchor="middle"
-      fontSize={10}
-      fontWeight={700}
-      fill="#374151"
-    >
+    <text x={x} y={y} textAnchor="middle" fontSize={10} fontWeight={700} fill="#374151">
       {numVal.toLocaleString()}
     </text>
   );
@@ -85,11 +81,10 @@ function ProductValueLabel(props: LabelProps): ReactElement | null {
   const vb = viewBox as { x?: number; y?: number; width?: number; height?: number } | undefined;
   const h = vb?.height ?? 0;
   const w = vb?.width ?? 0;
-  const x = (vb?.x ?? 0) + w / 2;
-
   const textLen = numVal.toLocaleString().length * 6;
   if (h < 16 || w < textLen + 4) return null;
 
+  const x = (vb?.x ?? 0) + w / 2;
   const y = (vb?.y ?? 0) + h / 2 + 4;
 
   return (
@@ -100,16 +95,10 @@ function ProductValueLabel(props: LabelProps): ReactElement | null {
 }
 
 export function TrendChartSection({
-  data,
-  onBarClick,
-  activeDate,
-  preset,
-  customStart,
-  customEnd,
-  excludedProducts,
-  onPresetChange,
-  onCustomRangeChange,
-  onToggleProduct,
+  data, onBarClick, activeDate,
+  preset, customStart, customEnd, excludedProducts,
+  onPresetChange, onCustomRangeChange, onToggleProduct,
+  loading,
 }: Props) {
   if (!data || data.rows.length === 0) {
     return (
@@ -126,33 +115,39 @@ export function TrendChartSection({
     (p) => !excludedProducts.has(p.productName)
   );
 
+  // ★ 모든 상품 키를 명시적으로 설정 (제외 상품 = 0)
   const filteredRows: TrendRow[] = data.rows.map((row) => {
     const newRow: TrendRow = { date: row.date, dayLabel: row.dayLabel, _total: 0 };
     let total = 0;
-    for (const p of visibleProducts) {
-      const val = Number(row[p.productName] || 0);
-      newRow[p.productName] = val;
-      total += val;
+    for (const p of data.productList) {
+      if (excludedProducts.has(p.productName)) {
+        newRow[p.productName] = 0;
+      } else {
+        const val = Number(row[p.productName] || 0);
+        newRow[p.productName] = val;
+        total += val;
+      }
     }
     newRow._total = total;
     return newRow;
   });
 
   const handleBarClick = (
-    data: BarRectangleItem,
+    barData: BarRectangleItem,
     _index: number,
     _event: React.MouseEvent<SVGPathElement, MouseEvent>,
   ) => {
     if (!onBarClick) return;
-    const payload = data?.payload as TrendRow | undefined;
-    if (payload?.date) {
-      onBarClick(String(payload.date));
-    }
+    const payload = barData?.payload as TrendRow | undefined;
+    if (payload?.date) onBarClick(String(payload.date));
   };
 
   const showProductLabels = visibleProducts.length > 1;
   const highlightShape = makeHighlightShape(activeDate);
   const lastProductIndex = visibleProducts.length - 1;
+
+  // ★ 필터 변경 시 차트 강제 리렌더링용 key
+  const chartKey = visibleProducts.map((p) => p.productId).join("-");
 
   return (
     <Card>
@@ -180,7 +175,6 @@ export function TrendChartSection({
             </Button>
           ))}
 
-          {/* ★ "기간 지정" 탭 선택 시에만 날짜 입력 표시 */}
           {preset === "custom" && (
             <div className="flex items-center gap-1 ml-2">
               <input
@@ -228,49 +222,61 @@ export function TrendChartSection({
         </div>
 
         {/* ── 차트 ── */}
-        <ResponsiveContainer width="100%" height={400}>
-          <BarChart
-            data={filteredRows}
-            margin={{ top: 25, right: 10, left: 10, bottom: 0 }}
-            style={{ cursor: onBarClick ? "pointer" : "default" }}
-          >
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip
-              formatter={(value) => {
-                if (Array.isArray(value)) return value.join(", ");
-                return value != null ? Number(value).toLocaleString() : "0";
-              }}
-            />
-            <Legend />
-            {visibleProducts.map((product, idx) => (
-              <Bar
-                key={product.productId}
-                dataKey={product.productName}
-                stackId="stack"
-                fill={product.color}
-                name={product.productName}
-                onClick={handleBarClick}
-                shape={highlightShape}
+        <div className="relative">
+          {loading && (
+            <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20 rounded-md">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">불러오는 중…</span>
+            </div>
+          )}
+            <ResponsiveContainer width="100%" height={400}>
+              <BarChart
+                key={chartKey}
+                data={filteredRows}
+                margin={{ top: 25, right: 10, left: 10, bottom: 0 }}
+                style={{ cursor: onBarClick ? "pointer" : "default" }}
               >
-                {showProductLabels && (
-                  <LabelList
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{ fontSize: 12 }}
+                  labelStyle={{ fontSize: 12, fontWeight: 600 }}
+                  itemStyle={{ fontSize: 11, padding: "1px 0" }}
+                  formatter={(value) => {
+                    if (Array.isArray(value)) return value.join(", ");
+                    return value != null ? Number(value).toLocaleString() : "0";
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} iconSize={10} />
+                {visibleProducts.map((product, idx) => (
+                  <Bar
+                    key={product.productId}
                     dataKey={product.productName}
-                    content={ProductValueLabel}
-                  />
-                )}
-                {idx === lastProductIndex && (
-                  <LabelList
-                    dataKey="_total"
-                    position="top"
-                    content={TotalLabel}
-                  />
-                )}
-              </Bar>
-            ))}
-          </BarChart>
-        </ResponsiveContainer>
+                    stackId="stack"
+                    fill={product.color}
+                    name={product.productName}
+                    onClick={handleBarClick}
+                    shape={highlightShape}
+                  >
+                    {showProductLabels && (
+                      <LabelList
+                        dataKey={product.productName}
+                        content={ProductValueLabel}
+                      />
+                    )}
+                    {idx === lastProductIndex && (
+                      <LabelList
+                        dataKey="_total"
+                        position="top"
+                        content={TotalLabel}
+                      />
+                    )}
+                  </Bar>
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+        </div>
       </CardContent>
     </Card>
   );
