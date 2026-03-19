@@ -784,18 +784,61 @@ export async function getDrilldownDetailData(
   // [3] 요일 기준 특이 고객사
   // ──────────────────────────────────────────────────────────
 
-  // MySQL accounts.order_day에서 요일 지정 정보 조회
-  const orderDayRows = await queryMySQL(
-    `SELECT id, order_day FROM accounts WHERE status = 'available'`,
+  // ★ subscription_at 조회
+  const subscriptionRows = await queryMySQL(
+    `SELECT id, order_day, subscription_at FROM accounts WHERE status = 'available'`,
     []
   );
 
   const accountOrderDaysMap = new Map<number, string[]>();
-  for (const row of orderDayRows as Record<string, unknown>[]) {
-    accountOrderDaysMap.set(
-      Number(row.id),
-      parseOrderDayField(row.order_day)
-    );
+  const accountSubscriptionMap = new Map<number, string | null>();
+  for (const row of subscriptionRows as Record<string, unknown>[]) {
+    const aid = Number(row.id);
+    accountOrderDaysMap.set(aid, parseOrderDayField(row.order_day));
+    const subAt = row.subscription_at;
+    if (!subAt) {
+      accountSubscriptionMap.set(aid, null);
+    } else if (subAt instanceof Date) {
+      const y = subAt.getFullYear();
+      const m = String(subAt.getMonth() + 1).padStart(2, "0");
+      const d = String(subAt.getDate()).padStart(2, "0");
+      accountSubscriptionMap.set(aid, `${y}-${m}-${d}`);
+    } else {
+      // ISO 문자열("2026-03-21T00:00:00.000Z")인 경우
+      const str = String(subAt);
+      if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+        accountSubscriptionMap.set(aid, str.slice(0, 10));
+      } else {
+        // 그 외 형식 → Date 파싱 후 변환
+        const parsed = new Date(str);
+        if (!isNaN(parsed.getTime())) {
+          const y = parsed.getFullYear();
+          const m = String(parsed.getMonth() + 1).padStart(2, "0");
+          const d = String(parsed.getDate()).padStart(2, "0");
+          accountSubscriptionMap.set(aid, `${y}-${m}-${d}`);
+        } else {
+          accountSubscriptionMap.set(aid, null);
+        }
+      }
+    }
+  }
+
+  // ★ 해당 요일 총 주문횟수 조회
+  // DAYOFWEEK: 1=일, 2=월, ..., 7=토 → JS getDay()와 +1 관계
+  const mysqlDow = dowIndex + 1;
+  const dowCountRows = await queryMySQL(
+    `SELECT o.account_id, COUNT(DISTINCT o.delivery_date) AS cnt
+     FROM orders o
+     WHERE o.deleted_at IS NULL
+       AND o.delivery_date >= '${DATA_START_DATE}'
+       AND o.delivery_date <= ?
+       AND DAYOFWEEK(o.delivery_date) = ?
+     GROUP BY o.account_id`,
+    [targetDate, mysqlDow]
+  );
+  const dowCountMap = new Map<number, number>();
+  for (const row of dowCountRows as Record<string, unknown>[]) {
+    dowCountMap.set(Number(row.account_id), Number(row.cnt) || 0);
   }
 
   const weekdayClients: WeekdayCaseClient[] = [];
@@ -808,6 +851,8 @@ export async function getDrilldownDetailData(
         case: "lapsed",
         accountId,
         accountName: info.name,
+        subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
+        dowOrderCount: dowCountMap.get(accountId) ?? 0,
         lastWeekQty: info.qty,
         thisWeekQty: 0,
         diff: -info.qty,
@@ -828,10 +873,12 @@ export async function getDrilldownDetailData(
         case: "new",
         accountId,
         accountName: info.name,
+        subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
+        dowOrderCount: dowCountMap.get(accountId) ?? 0,
         lastWeekQty: 0,
         thisWeekQty: info.qty,
         diff: info.qty,
-        changeRate: null, // 전주 0이므로 변화율 없음
+        changeRate: null,
         products: Array.from(info.products.entries()).map(([name, qty]) => ({
           productName: name,
           qty,
@@ -840,17 +887,11 @@ export async function getDrilldownDetailData(
     }
   }
 
-  // 미지정(unassigned): accounts.order_day에 해당 요일(dowName) 미포함인데 금주 주문 존재
+  // 미지정(unassigned)
   for (const [aid, info] of Object.entries(thisWeekByAccount)) {
     const accountId = Number(aid);
-
-    // 이미 lapsed/new로 분류된 고객사는 스킵
     if (weekdayClients.some((c) => c.accountId === accountId)) continue;
-
     const orderDays = accountOrderDaysMap.get(accountId) || [];
-
-    // order_day 배열에 해당 요일이 포함되어 있으면 정상 → 스킵
-    // 포함되지 않은 경우만 "미지정"으로 분류
     if (orderDays.includes(dowName)) continue;
 
     const lastWeek = lastWeekByAccount[accountId];
@@ -861,6 +902,8 @@ export async function getDrilldownDetailData(
       case: "unassigned",
       accountId,
       accountName: info.name,
+      subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
+      dowOrderCount: dowCountMap.get(accountId) ?? 0,
       lastWeekQty: lastQty,
       thisWeekQty: info.qty,
       diff,
@@ -913,6 +956,8 @@ export async function getDrilldownDetailData(
       quantityClients.push({
         accountId,
         accountName: tw?.name || lw?.name || "",
+        subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
+        dowOrderCount: dowCountMap.get(accountId) ?? 0,
         lastWeekQty: lastQty,
         thisWeekQty: thisQty,
         diff,
@@ -933,7 +978,6 @@ export async function getDrilldownDetailData(
     }
   }
 
-  // 절대값 큰 순으로 정렬
   quantityClients.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
 
   return {

@@ -1,19 +1,19 @@
 // app/(main)/dashboard/_components/DrilldownDetailSection.tsx (전체 교체)
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, X } from "lucide-react";
-// ★ 외부 컴포넌트 import (인라인 정의 제거)
 import { WeekdayTable } from "./WeekdayTable";
 import { QuantityTable } from "./QuantityTable";
 import type {
   DrilldownDetailResponse,
   QuantityClient,
+  WeekdayCaseClient,
+  ProductChip,
 } from "@/types/dashboard";
 
-// ─── Props ───
 interface Props {
   data: DrilldownDetailResponse | null;
   date: string;
@@ -23,17 +23,10 @@ interface Props {
 
 type WeekdayFilter = "all" | "lapsed" | "new" | "unassigned";
 
-// ─── 필터 탭 (색상 통일: 검은색 계열) ───
 function FilterTab({
-  label,
-  count,
-  active,
-  onClick,
+  label, count, active, onClick,
 }: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
+  label: string; count: number; active: boolean; onClick: () => void;
 }) {
   return (
     <button
@@ -54,13 +47,9 @@ function FilterTab({
 }
 
 function SummaryCard({
-  label,
-  value,
-  className,
+  label, value, className,
 }: {
-  label: string;
-  value: string | number;
-  className?: string;
+  label: string; value: string | number; className?: string;
 }) {
   return (
     <div className={`rounded-lg border p-3 text-center ${className ?? ""}`}>
@@ -70,9 +59,41 @@ function SummaryCard({
   );
 }
 
-// ═══════════════════════════════════════════════
+function computeNetSummary(
+  clients: WeekdayCaseClient[],
+  filter: WeekdayFilter,
+  productChips: ProductChip[]
+) {
+  const filtered = filter === "all" ? clients : clients.filter((c) => c.case === filter);
+  const totalNet = filtered.reduce((sum, c) => sum + c.diff, 0);
+
+  const productNetMap = new Map<string, number>();
+  for (const c of filtered) {
+    const sign = c.case === "lapsed" ? -1 : 1;
+    for (const p of c.products) {
+      const prev = productNetMap.get(p.productName) || 0;
+      productNetMap.set(p.productName, prev + (sign === -1 ? -p.qty : p.qty));
+    }
+  }
+
+  const productNets: { name: string; color: string; net: number }[] = [];
+  for (const chip of productChips) {
+    const net = productNetMap.get(chip.productName);
+    if (net !== undefined && net !== 0) {
+      productNets.push({ name: chip.productName, color: chip.color, net });
+    }
+  }
+
+  return { totalNet, productNets };
+}
+
 export function DrilldownDetailSection({ data, date, loading, onClose }: Props) {
   const [weekdayFilter, setWeekdayFilter] = useState<WeekdayFilter>("all");
+
+  const weekdayNetSummary = useMemo(() => {
+    if (!data) return { totalNet: 0, productNets: [] };
+    return computeNetSummary(data.weekdayClients, weekdayFilter, data.productChips);
+  }, [data, weekdayFilter]);
 
   if (loading) {
     return (
@@ -87,13 +108,14 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
 
   if (!data) return null;
 
-  // ★ 수량 기준 이상치 필터링: 요일 기준 고객 제외 + |diff| >= 3
   const weekdayAccountIds = new Set(data.weekdayClients.map((c) => c.accountId));
   const filteredQuantityClients: QuantityClient[] = data.quantityClients
     .filter((c) => !weekdayAccountIds.has(c.accountId) && Math.abs(c.diff ?? 0) >= 3)
     .map((c) => ({
       accountId: c.accountId,
       accountName: c.accountName,
+      subscriptionAt: c.subscriptionAt,
+      dowOrderCount: c.dowOrderCount,
       totalLast: c.lastWeekQty,
       totalThis: c.thisWeekQty,
       totalDiff: c.diff,
@@ -104,6 +126,21 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
         diff: p.diff,
       })),
     }));
+
+  const qtyTotalNet = filteredQuantityClients.reduce((sum, c) => sum + c.totalDiff, 0);
+  const qtyProductNetMap = new Map<string, number>();
+  for (const c of filteredQuantityClients) {
+    for (const p of c.products) {
+      qtyProductNetMap.set(p.productName, (qtyProductNetMap.get(p.productName) || 0) + p.diff);
+    }
+  }
+  const qtyProductNets: { name: string; color: string; net: number }[] = [];
+  for (const chip of data.productChips) {
+    const net = qtyProductNetMap.get(chip.productName);
+    if (net !== undefined && net !== 0) {
+      qtyProductNets.push({ name: chip.productName, color: chip.color, net });
+    }
+  }
 
   return (
     <Card>
@@ -119,24 +156,14 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
       </CardHeader>
 
       <CardContent className="space-y-6">
-        {/* ── 서머리 카드 ── */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <SummaryCard label="주문 고객사" value={data.orderedCount} />
           <SummaryCard label="미주문 고객사" value={data.unorderedCount} />
           <SummaryCard label="총 수량" value={data.totalQty.toLocaleString()} />
-          <SummaryCard
-            label="신규 주문"
-            value={data.newCount}
-            className="border-blue-200 bg-blue-50/50"
-          />
-          <SummaryCard
-            label="이탈"
-            value={data.lapsedCount}
-            className="border-red-200 bg-red-50/50"
-          />
+          <SummaryCard label="신규 주문" value={data.newCount} className="border-blue-200 bg-blue-50/50" />
+          <SummaryCard label="이탈" value={data.lapsedCount} className="border-red-200 bg-red-50/50" />
         </div>
 
-        {/* ── 상품 뱃지 ── */}
         <div className="flex flex-wrap gap-2">
           {data.productChips.map((chip) => (
             <span
@@ -153,46 +180,39 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
         {/* ── 요일 기준 특이 고객사 ── */}
         <Card>
           <CardHeader className="pb-3">
-            {/* <div className="flex items-center justify-between flex-wrap gap-2"> */}
-              <CardTitle className="text-base">
-                요일 기준 특이 고객사 (전주 동일 요일 비교)
-              </CardTitle>
-            {/* </div> */}
+            <CardTitle className="text-base">
+              요일 기준 특이 고객사 (전주 동일 요일 비교)
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
-              <FilterTab
-                label="전체"
-                count={data.weekdaySummary.total}
-                active={weekdayFilter === "all"}
-                onClick={() => setWeekdayFilter("all")}
-              />
-              <FilterTab
-                label="전주 O → 금주 X"
-                count={data.weekdaySummary.lapsed}
-                active={weekdayFilter === "lapsed"}
-                onClick={() => setWeekdayFilter("lapsed")}
-              />
-              <FilterTab
-                label="전주 X → 금주 O"
-                count={data.weekdaySummary.new}
-                active={weekdayFilter === "new"}
-                onClick={() => setWeekdayFilter("new")}
-              />
-              <FilterTab
-                label="요일 미지정"
-                count={data.weekdaySummary.unassigned}
-                active={weekdayFilter === "unassigned"}
-                onClick={() => setWeekdayFilter("unassigned")}
-              />
+              <FilterTab label="전체" count={data.weekdaySummary.total} active={weekdayFilter === "all"} onClick={() => setWeekdayFilter("all")} />
+              <FilterTab label="전주 O → 금주 X" count={data.weekdaySummary.lapsed} active={weekdayFilter === "lapsed"} onClick={() => setWeekdayFilter("lapsed")} />
+              <FilterTab label="전주 X → 금주 O" count={data.weekdaySummary.new} active={weekdayFilter === "new"} onClick={() => setWeekdayFilter("new")} />
+              <FilterTab label="요일 미지정" count={data.weekdaySummary.unassigned} active={weekdayFilter === "unassigned"} onClick={() => setWeekdayFilter("unassigned")} />
+
+              <div className="ml-auto flex items-center gap-3 text-xs">
+                <span className="text-gray-500">순증:</span>
+                <span className={`font-bold ${weekdayNetSummary.totalNet > 0 ? "text-blue-600" : weekdayNetSummary.totalNet < 0 ? "text-red-600" : "text-gray-400"}`}>
+                  전체 {weekdayNetSummary.totalNet > 0 ? "+" : ""}{weekdayNetSummary.totalNet}
+                </span>
+                {weekdayNetSummary.productNets.map((pn) => (
+                  <span key={pn.name} className="inline-flex items-center gap-1">
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: pn.color }} />
+                    <span className={`font-medium ${pn.net > 0 ? "text-blue-600" : "text-red-600"}`}>
+                      {pn.net > 0 ? "+" : ""}{pn.net}
+                    </span>
+                  </span>
+                ))}
+              </div>
             </div>
 
-            {/* ★ 외부 WeekdayTable 컴포넌트 사용 */}
             <WeekdayTable
               clients={data.weekdayClients}
               filter={weekdayFilter}
               scope="total"
               productChips={data.productChips}
+              targetDate={date}
             />
           </CardContent>
         </Card>
@@ -200,18 +220,32 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
         {/* ── 수량 기준 이상치 ── */}
         <Card>
           <CardHeader className="pb-3">
-            {/* <div className="flex items-center justify-between flex-wrap gap-2"> */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base">
                 수량 기준 이상치 (전주 대비 차이 ±3 이상)
               </CardTitle>
-            {/* </div> */}
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-gray-500">순증:</span>
+                <span className={`font-bold ${qtyTotalNet > 0 ? "text-blue-600" : qtyTotalNet < 0 ? "text-red-600" : "text-gray-400"}`}>
+                  전체 {qtyTotalNet > 0 ? "+" : ""}{qtyTotalNet}
+                </span>
+                {qtyProductNets.map((pn) => (
+                  <span key={pn.name} className="inline-flex items-center gap-1">
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: pn.color }} />
+                    <span className={`font-medium ${pn.net > 0 ? "text-blue-600" : "text-red-600"}`}>
+                      {pn.net > 0 ? "+" : ""}{pn.net}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            {/* ★ 외부 QuantityTable 컴포넌트 사용 */}
             <QuantityTable
               clients={filteredQuantityClients}
               scope="total"
               productChips={data.productChips}
+              targetDate={date}
             />
           </CardContent>
         </Card>

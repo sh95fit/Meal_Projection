@@ -123,6 +123,8 @@ export type WeekdayCase = "lapsed" | "new" | "unassigned";
  * - case           : 케이스 유형
  * - accountId      : accounts.id
  * - accountName    : 고객사명
+ * - subscriptionAt : 구독 전환일
+ * - dowOrderCount: : 해당 요일 총 주문횟수
  * - lastWeekQty    : 전주 총 주문 수량
  * - thisWeekQty    : 금주 총 주문 수량
  * - diff           : thisWeekQty - lastWeekQty
@@ -133,6 +135,8 @@ export interface WeekdayCaseClient {
   case: WeekdayCase;
   accountId: number;
   accountName: string;
+  subscriptionAt: string | null; 
+  dowOrderCount: number; 
   lastWeekQty: number;
   thisWeekQty: number;
   diff: number;
@@ -144,6 +148,8 @@ export interface WeekdayCaseClient {
  * 수량 기준 특이 고객사 (전주 대비 ±3 이상 변동)
  * - accountId        : accounts.id
  * - accountName      : 고객사명
+ * - subscriptionAt   : 구독 전환일
+ * - dowOrderCount:   : 해당 요일 총 주문횟수
  * - lastWeekQty      : 전주 총 주문 수량
  * - thisWeekQty      : 금주 총 주문 수량
  * - diff             : thisWeekQty - lastWeekQty
@@ -154,6 +160,8 @@ export interface WeekdayCaseClient {
 export interface QuantityAnomalyClient {
   accountId: number;
   accountName: string;
+  subscriptionAt: string | null; 
+  dowOrderCount: number; 
   lastWeekQty: number;
   thisWeekQty: number;
   diff: number;
@@ -217,9 +225,10 @@ export interface DrilldownDetailResponse {
 /**
  * 수량 기준 특이 고객사 — QuantityTable 컴포넌트용
  * (DrilldownDetailSection 내부의 QuantityAnomalyClient와 별도)
- *
  * - accountId    : accounts.id
  * - accountName  : 고객사명
+ * - subscriptionAt   : 구독 전환일
+ * - dowOrderCount:   : 해당 요일 총 주문횟수
  * - totalLast    : 전주 총 수량
  * - totalThis    : 금주 총 수량
  * - totalDiff    : totalThis - totalLast
@@ -228,6 +237,8 @@ export interface DrilldownDetailResponse {
 export interface QuantityClient {
   accountId: number;
   accountName: string;
+  subscriptionAt: string | null;
+  dowOrderCount: number;
   totalLast: number;
   totalThis: number;
   totalDiff: number;
