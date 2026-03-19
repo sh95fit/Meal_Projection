@@ -272,6 +272,7 @@ export interface QuantityClient {
  * - currentAvg   : 현재 기간 일평균 주문량
  * - lastOrderDate: 마지막 주문일
  * - mainProduct  : 주로 주문한 상품명
+ * - productAvgs  : 상품별 일평균 수량
  */
 export interface ClientChange {
   type: "churned" | "new" | "converted";
@@ -286,19 +287,38 @@ export interface ClientChange {
 }
 
 /**
+ * 요일별 순유입 — 상품별 상세
+ */
+export interface DowFlowProductDetail {
+  productName: string;
+  churnedAvgSum: number;
+  churnedMedianSum: number;
+  newAvgSum: number;
+  newMedianSum: number;
+}
+
+/**
  * 요일별 순유입 정보
- * - dow      : 'mon' | 'tue' | ... | 'fri'
- * - dowLabel : '월' | '화' | ... | '금'
- * - churned  : 이탈 고객 수
- * - newCount : 신규 고객 수
- * - net      : newCount - churned
+ * - dow              : 'mon' | 'tue' | ... | 'sat'
+ * - dowLabel         : '월' | '화' | ... | '토'
+ * - churnedAvgSum    : 이탈 고객사 평균 식수 합계
+ * - churnedMedianSum : 이탈 고객사 중간 식수 합계
+ * - newAvgSum        : 신규 고객사 평균 식수 합계
+ * - newMedianSum     : 신규 고객사 중간 식수 합계
+ * - netAvg           : 순 변화 (평균 기준)
+ * - netMedian        : 순 변화 (중간 기준)
+ * - products         : 상품별 상세
  */
 export interface DowFlow {
   dow: string;
   dowLabel: string;
-  churned: number;
-  newCount: number;
-  net: number;
+  churnedAvgSum: number;
+  churnedMedianSum: number;
+  newAvgSum: number;
+  newMedianSum: number;
+  netAvg: number;
+  netMedian: number;
+  products: DowFlowProductDetail[];
 }
 
 /**

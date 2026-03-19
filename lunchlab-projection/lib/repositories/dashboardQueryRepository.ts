@@ -22,6 +22,7 @@ import type {
   ClientChange,
   DowFlow,
   ClientChangeResponse,
+  DowFlowProductDetail,
 } from "@/types/dashboard";
 
 import { getProductColorMap } from "@/lib/repositories/productRepository";
@@ -1311,38 +1312,123 @@ export async function getClientChangeData(
   }
 
   // ═══════════════════════════════════════
-  // 5) 요일별 순변화 (dowFlows)
+  // 5) 요일별 순변화 (dowFlows) — 평균/중간값 식수 합계
   // ═══════════════════════════════════════
 
   const dowFlows: DowFlow[] = [];
 
-  // 평일만 (월~금)
-  const weekdayIndices = [1, 2, 3, 4, 5]; // mon=1, tue=2, wed=3, thu=4, fri=5
+  // 토요일 포함: 월(1)~토(6)
+  const weekdayIndices = [1, 2, 3, 4, 5, 6];
+
+  // 중간값 헬퍼
+  function medianOf(arr: number[]): number {
+    if (arr.length === 0) return 0;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0
+      ? sorted[mid]
+      : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+  }
 
   for (const dayIdx of weekdayIndices) {
     const dowName = DAY_NAMES[dayIdx]; // "mon", "tue", ...
     const dowLabel = DOW_LABELS[dayIdx]; // "월", "화", ...
 
-    // 이탈 고객 중 해당 요일에 주문하던 고객 수
+    // ── 이탈 고객 중 해당 요일이 order_day에 포함된 고객사 ──
     const churnedOnDay = churnedRows.filter((r) => {
       const orderDays = parseOrderDayField(r.order_day);
       return orderDays.includes(dowName);
-    }).length;
+    });
 
-    // 신규 고객 중 해당 요일에 주문하는 고객 수
+    // ── 신규 고객 중 해당 요일이 order_day에 포함된 고객사 ──
     const newOnDay = newRows.filter((r) => {
       const orderDays = parseOrderDayField(r.order_day);
       return orderDays.includes(dowName);
-    }).length;
+    });
+
+    // 이탈 - 전체 평균/중간값 식수 합계
+    const churnedAvgs = churnedOnDay.map(
+      (r) => orderStatsMap.get(Number(r.id))?.avgQty ?? 0
+    );
+    const churnedAvgSum =
+      Math.round(churnedAvgs.reduce((s, v) => s + v, 0) * 10) / 10;
+    const churnedMedianSum =
+      churnedAvgs.length > 0
+        ? Math.round(medianOf(churnedAvgs) * churnedAvgs.length * 10) / 10
+        : 0;
+
+    // 신규 - 전체 평균/중간값 식수 합계
+    const newAvgs = newOnDay.map(
+      (r) => orderStatsMap.get(Number(r.id))?.avgQty ?? 0
+    );
+    const newAvgSum =
+      Math.round(newAvgs.reduce((s, v) => s + v, 0) * 10) / 10;
+    const newMedianSum =
+      newAvgs.length > 0
+        ? Math.round(medianOf(newAvgs) * newAvgs.length * 10) / 10
+        : 0;
+
+    // ── 상품별 집계 ──
+    const productMap = new Map<
+      string,
+      { churnedAvgs: number[]; newAvgs: number[] }
+    >();
+
+    for (const r of churnedOnDay) {
+      const stats = orderStatsMap.get(Number(r.id));
+      for (const pa of stats?.productAvgs ?? []) {
+        if (!productMap.has(pa.productName)) {
+          productMap.set(pa.productName, { churnedAvgs: [], newAvgs: [] });
+        }
+        productMap.get(pa.productName)!.churnedAvgs.push(pa.avg);
+      }
+    }
+
+    for (const r of newOnDay) {
+      const stats = orderStatsMap.get(Number(r.id));
+      for (const pa of stats?.productAvgs ?? []) {
+        if (!productMap.has(pa.productName)) {
+          productMap.set(pa.productName, { churnedAvgs: [], newAvgs: [] });
+        }
+        productMap.get(pa.productName)!.newAvgs.push(pa.avg);
+      }
+    }
+
+    const products: DowFlowProductDetail[] = Array.from(
+      productMap.entries()
+    ).map(([name, data]) => ({
+      productName: name,
+      churnedAvgSum:
+        Math.round(data.churnedAvgs.reduce((s, v) => s + v, 0) * 10) / 10,
+      churnedMedianSum:
+        data.churnedAvgs.length > 0
+          ? Math.round(
+              medianOf(data.churnedAvgs) * data.churnedAvgs.length * 10
+            ) / 10
+          : 0,
+      newAvgSum:
+        Math.round(data.newAvgs.reduce((s, v) => s + v, 0) * 10) / 10,
+      newMedianSum:
+        data.newAvgs.length > 0
+          ? Math.round(
+              medianOf(data.newAvgs) * data.newAvgs.length * 10
+            ) / 10
+          : 0,
+    }));
 
     dowFlows.push({
       dow: dowName,
       dowLabel,
-      churned: churnedOnDay,
-      newCount: newOnDay,
-      net: newOnDay - churnedOnDay,
+      churnedAvgSum,
+      churnedMedianSum,
+      newAvgSum,
+      newMedianSum,
+      netAvg: Math.round((newAvgSum - churnedAvgSum) * 10) / 10,
+      netMedian: Math.round((newMedianSum - churnedMedianSum) * 10) / 10,
+      products,
     });
   }
+
 
   // ═══════════════════════════════════════
   // 6) summary (증감 포함)
