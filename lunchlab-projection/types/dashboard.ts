@@ -120,7 +120,7 @@ export type WeekdayCase = "lapsed" | "new" | "unassigned";
 
 
 /** 계정 이용상태 */
-export type AccountStatus = "available" | "disabled" | "considering" | "pending" | string;
+export type AccountStatus = "available" | "disabled" | "considering" | "pending" | "suspended" | "scheduled" | string;
 
 
 /**

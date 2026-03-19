@@ -73,11 +73,26 @@ export async function GET(request: NextRequest) {
         case "90d":
           startDate = addDays(today, -89);
           break;
+        case "custom": {
+          // ★ custom이 preset 파라미터로 넘어온 경우 → start/end 확인
+          const fallbackStart = searchParams.get("start");
+          const fallbackEnd = searchParams.get("end");
+          if (fallbackStart) {
+            startDate = fallbackStart;
+            if (fallbackEnd && fallbackEnd > endDate) {
+              const data = await getTrendData(startDate, fallbackEnd);
+              return NextResponse.json(data);
+            }
+          } else {
+            startDate = addDays(today, -29); // start 없으면 30일 폴백
+          }
+          break;
+        }
         default:
-          startDate = addDays(today, -59); // 기본 60일
+          startDate = addDays(today, -29); // ★ 60일 → 30일로 변경
       }
     } else {
-      // ── 커스텀 모드 ──
+      // ── 커스텀 모드 (preset 파라미터 없이 start/end만 전달) ──
       const customStart = searchParams.get("start");
       const customEnd = searchParams.get("end");
 
@@ -90,9 +105,7 @@ export async function GET(request: NextRequest) {
 
       startDate = customStart;
 
-      // 커스텀 종료일이 지정되어도 +2 영업일까지는 보장
       if (customEnd && customEnd > endDate) {
-        // 사용자가 더 먼 미래를 지정한 경우 그대로 사용
         const data = await getTrendData(startDate, customEnd);
         return NextResponse.json(data);
       }

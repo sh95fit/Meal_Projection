@@ -47,13 +47,25 @@ function StatusBadge({ status }: { status: string }) {
     case "considering":
       return (
         <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-[10px]">
-          체험험
+          체험
         </Badge>
       );
     case "pending":
       return (
         <Badge variant="outline" className="text-purple-600 border-purple-300 bg-purple-50 text-[10px]">
           대기
+        </Badge>
+      );
+    case "suspended":
+      return (
+        <Badge variant="outline" className="text-orange-600 border-orange-300 bg-grange-50 text-[10px]">
+          보류
+        </Badge>
+      );
+    case "scheduled":
+      return (
+        <Badge variant="outline" className="text-gray-600 border-gray-300 bg-gray-50 text-[10px]">
+          전환예정
         </Badge>
       );
     default:
