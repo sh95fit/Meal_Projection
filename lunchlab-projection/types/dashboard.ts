@@ -118,11 +118,17 @@ export interface TrendResponse {
  */
 export type WeekdayCase = "lapsed" | "new" | "unassigned";
 
+
+/** 계정 이용상태 */
+export type AccountStatus = "available" | "disabled" | "considering" | "pending" | string;
+
+
 /**
  * 요일 기준 특이 고객사
  * - case           : 케이스 유형
  * - accountId      : accounts.id
  * - accountName    : 고객사명
+ * - accountStatus  : 이용 상태
  * - subscriptionAt : 구독 전환일
  * - dowOrderCount: : 해당 요일 총 주문횟수
  * - lastWeekQty    : 전주 총 주문 수량
@@ -135,6 +141,7 @@ export interface WeekdayCaseClient {
   case: WeekdayCase;
   accountId: number;
   accountName: string;
+  accountStatus: AccountStatus; 
   subscriptionAt: string | null; 
   dowOrderCount: number; 
   lastWeekQty: number;
@@ -148,6 +155,7 @@ export interface WeekdayCaseClient {
  * 수량 기준 특이 고객사 (전주 대비 ±3 이상 변동)
  * - accountId        : accounts.id
  * - accountName      : 고객사명
+ * - accountStatus    : 이용 상태
  * - subscriptionAt   : 구독 전환일
  * - dowOrderCount:   : 해당 요일 총 주문횟수
  * - lastWeekQty      : 전주 총 주문 수량
@@ -160,6 +168,7 @@ export interface WeekdayCaseClient {
 export interface QuantityAnomalyClient {
   accountId: number;
   accountName: string;
+  accountStatus: AccountStatus;
   subscriptionAt: string | null; 
   dowOrderCount: number; 
   lastWeekQty: number;
@@ -227,6 +236,7 @@ export interface DrilldownDetailResponse {
  * (DrilldownDetailSection 내부의 QuantityAnomalyClient와 별도)
  * - accountId    : accounts.id
  * - accountName  : 고객사명
+ * - accountStatus    : 이용 상태
  * - subscriptionAt   : 구독 전환일
  * - dowOrderCount:   : 해당 요일 총 주문횟수
  * - totalLast    : 전주 총 수량
@@ -237,6 +247,7 @@ export interface DrilldownDetailResponse {
 export interface QuantityClient {
   accountId: number;
   accountName: string;
+  accountStatus: AccountStatus; 
   subscriptionAt: string | null;
   dowOrderCount: number;
   totalLast: number;
