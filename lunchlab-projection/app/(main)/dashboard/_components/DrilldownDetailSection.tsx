@@ -114,6 +114,7 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
     .map((c) => ({
       accountId: c.accountId,
       accountName: c.accountName,
+      accountStatus: c.accountStatus,              // ★ 추가
       subscriptionAt: c.subscriptionAt,
       dowOrderCount: c.dowOrderCount,
       totalLast: c.lastWeekQty,

@@ -12,11 +12,10 @@ interface Props {
   filter: WeekdayFilter;
   scope: ViewScope;
   productChips: ProductChip[];
-  targetDate: string;                              // ★ 추가
+  targetDate: string;
   onClientClick?: (accountId: number) => void;
 }
 
-// ★ 구독 유지일수 계산
 function calcRetentionDays(subscriptionAt: string | null, targetDate: string): number | null {
   if (!subscriptionAt) return null;
   const sub = subscriptionAt.slice(0, 10);
@@ -28,6 +27,42 @@ function calcRetentionDays(subscriptionAt: string | null, targetDate: string): n
   const diffMs = tgtDate.getTime() - subDate.getTime();
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   return days >= 0 ? days : null;
+}
+
+// ★ 이용상태 배지
+function StatusBadge({ status }: { status: string }) {
+  switch (status) {
+    case "available":
+      return (
+        <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-[10px]">
+          이용중
+        </Badge>
+      );
+    case "disabled":
+      return (
+        <Badge variant="outline" className="text-red-600 border-red-300 bg-red-50 text-[10px]">
+          이용종료
+        </Badge>
+      );
+    case "considering":
+      return (
+        <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-[10px]">
+          체험험
+        </Badge>
+      );
+    case "pending":
+      return (
+        <Badge variant="outline" className="text-purple-600 border-purple-300 bg-purple-50 text-[10px]">
+          대기
+        </Badge>
+      );
+    default:
+      return (
+        <Badge variant="outline" className="text-gray-500 border-gray-300 bg-gray-50 text-[10px]">
+          {status || "-"}
+        </Badge>
+      );
+  }
 }
 
 function CaseBadge({ caseType }: { caseType: string }) {
@@ -90,6 +125,7 @@ export function WeekdayTable({ clients, filter, scope, productChips, targetDate,
           <tr>
             <th className={thClass}>구분</th>
             <th className={thClass}>고객사</th>
+            <th className={thClass}>이용상태</th>
             <th className={thClass}>전환일</th>
             <th className={thRight}>요일주문횟수</th>
             <th className={thRight}>전주</th>
@@ -111,6 +147,7 @@ export function WeekdayTable({ clients, filter, scope, productChips, targetDate,
               >
                 <td className={tdClass}><CaseBadge caseType={client.case} /></td>
                 <td className={`${tdClass} font-semibold`}>{client.accountName}</td>
+                <td className={tdClass}><StatusBadge status={client.accountStatus} /></td>
                 <td className={`${tdClass} text-xs text-gray-500 whitespace-nowrap`}>
                   {client.subscriptionAt ? (
                     <>

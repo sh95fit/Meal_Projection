@@ -786,15 +786,18 @@ export async function getDrilldownDetailData(
 
   // ★ subscription_at 조회
   const subscriptionRows = await queryMySQL(
-    `SELECT id, order_day, subscription_at FROM accounts WHERE status = 'available'`,
+    `SELECT id, order_day, subscription_at, status FROM accounts`,
     []
   );
 
   const accountOrderDaysMap = new Map<number, string[]>();
   const accountSubscriptionMap = new Map<number, string | null>();
+  const accountStatusMap = new Map<number, string>(); 
   for (const row of subscriptionRows as Record<string, unknown>[]) {
     const aid = Number(row.id);
     accountOrderDaysMap.set(aid, parseOrderDayField(row.order_day));
+    accountStatusMap.set(aid, String(row.status || "unknown"));
+
     const subAt = row.subscription_at;
     if (!subAt) {
       accountSubscriptionMap.set(aid, null);
@@ -851,6 +854,7 @@ export async function getDrilldownDetailData(
         case: "lapsed",
         accountId,
         accountName: info.name,
+        accountStatus: accountStatusMap.get(accountId) ?? "unknown",
         subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
         dowOrderCount: dowCountMap.get(accountId) ?? 0,
         lastWeekQty: info.qty,
@@ -873,6 +877,7 @@ export async function getDrilldownDetailData(
         case: "new",
         accountId,
         accountName: info.name,
+        accountStatus: accountStatusMap.get(accountId) ?? "unknown",
         subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
         dowOrderCount: dowCountMap.get(accountId) ?? 0,
         lastWeekQty: 0,
@@ -902,6 +907,7 @@ export async function getDrilldownDetailData(
       case: "unassigned",
       accountId,
       accountName: info.name,
+      accountStatus: accountStatusMap.get(accountId) ?? "unknown",
       subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
       dowOrderCount: dowCountMap.get(accountId) ?? 0,
       lastWeekQty: lastQty,
@@ -956,6 +962,7 @@ export async function getDrilldownDetailData(
       quantityClients.push({
         accountId,
         accountName: tw?.name || lw?.name || "",
+        accountStatus: accountStatusMap.get(accountId) ?? "unknown",
         subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
         dowOrderCount: dowCountMap.get(accountId) ?? 0,
         lastWeekQty: lastQty,

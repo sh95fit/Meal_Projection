@@ -54,7 +54,7 @@ export function useDashboard() {
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ★ ref로 최신 필터 상태를 항상 추적 (stale closure 완전 방지)
+  // ★ ref로 최신 필터 상태를 항상 추적
   const realtimeDateRef = useRef(realtimeDate);
   realtimeDateRef.current = realtimeDate;
 
@@ -80,7 +80,14 @@ export function useDashboard() {
     customEnd: clientCustomEnd,
   };
 
-  // ─── Fetch 함수들 (★ 모두 deps=[] → 참조 안정, ref에서 최신값 읽음) ───
+  // ★ 초기 로드 완료 여부 (useEffect 가드용)
+  const initializedRef = useRef(false);
+
+  // ★ debounce 타이머 ref (다중 state 변경이 한 번의 fetch로 합쳐짐)
+  const trendDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clientDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ─── Fetch 함수들 (모두 deps=[] → 참조 안정) ───
 
   const fetchRealtime = useCallback(async (date?: string) => {
     const targetDate = date || realtimeDateRef.current;
@@ -158,6 +165,7 @@ export function useDashboard() {
     setLoading(true);
     await fetchRealtime();
     await Promise.all([fetchTrend(), fetchClients()]);
+    initializedRef.current = true;
     setLoading(false);
   }, [fetchRealtime, fetchTrend, fetchClients]);
 
@@ -165,7 +173,7 @@ export function useDashboard() {
     await fetchRealtime();
   }, [fetchRealtime]);
 
-  // ─── 드릴다운 (트렌드 차트 fetch를 트리거하지 않음) ───
+  // ─── 드릴다운 ───
   const openDrilldown = useCallback(async (date: string) => {
     setDrilldownDate(date);
     setDrilldownOpen(true);
@@ -264,25 +272,39 @@ export function useDashboard() {
 
   // ─── 실시간 날짜 변경 시 재조회 ───
   useEffect(() => {
-    if (realtime) {
+    if (initializedRef.current) {
       fetchRealtime(realtimeDate);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeDate]);
 
-  // ─── 추이 차트: 필터 상태값이 변할 때만 재조회 ───
+  // ─── ★ 추이 차트: debounce로 다중 state 변경을 1회 fetch로 합침 ───
   useEffect(() => {
-    if (realtime) {
+    if (!initializedRef.current) return;
+
+    if (trendDebounceRef.current) clearTimeout(trendDebounceRef.current);
+    trendDebounceRef.current = setTimeout(() => {
       fetchTrend();
-    }
+    }, 0);
+
+    return () => {
+      if (trendDebounceRef.current) clearTimeout(trendDebounceRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trendPreset, trendCustomStart, trendCustomEnd]);
 
-  // ─── 고객 변동: 필터 상태값이 변할 때만 재조회 ───
+  // ─── ★ 고객 변동: 동일한 debounce 패턴 ───
   useEffect(() => {
-    if (realtime) {
+    if (!initializedRef.current) return;
+
+    if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
+    clientDebounceRef.current = setTimeout(() => {
       fetchClients();
-    }
+    }, 0);
+
+    return () => {
+      if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientPreset, clientCustomStart, clientCustomEnd]);
 
