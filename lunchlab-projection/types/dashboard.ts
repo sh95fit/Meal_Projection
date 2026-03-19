@@ -457,6 +457,8 @@ export interface ClientModalData {
   accountName: string;
   /** 고객 유형 (churned | new | converted) */
   clientType: "churned" | "new" | "converted";
+  /** 주문 요일 (예: ["월","화","수","목","금"]) */
+  orderDays: string[];    
   /** 이용 종료일 — 이탈 고객만 */
   terminateAt: string | null;
   /** 구독 전환일 — 이탈/신규 고객 */
