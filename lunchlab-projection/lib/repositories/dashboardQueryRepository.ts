@@ -1110,8 +1110,10 @@ export async function getClientChangeData(
             a.subscription_at, a.order_day
      FROM accounts a
      WHERE a.status = 'disabled'
+       AND a.terminate_at IS NOT NULL
        AND a.terminate_at >= ?
-       AND a.terminate_at <= ?`,
+       AND a.terminate_at <= ?
+       AND a.subscription_at is not null`,
     [startDate, endDate]
   ) as Record<string, unknown>[];
 
@@ -1140,8 +1142,10 @@ export async function getClientChangeData(
 
   const prevChurnedRows = await queryMySQL(
     `SELECT COUNT(*) AS cnt FROM accounts
-     WHERE status = 'disabled'
-       AND terminate_at >= ? AND terminate_at <= ?`,
+    WHERE status = 'disabled'
+      AND subscription_at IS NOT NULL
+      AND terminate_at IS NOT NULL
+      AND terminate_at >= ? AND terminate_at <= ?`,
     [prevStartDate, prevEndDate]
   ) as Record<string, unknown>[];
 
