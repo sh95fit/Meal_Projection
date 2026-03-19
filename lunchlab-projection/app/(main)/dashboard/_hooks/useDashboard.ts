@@ -9,7 +9,7 @@ import type {
   TrendResponse,
   DrilldownDetailResponse,
   ClientChangeResponse,
-  ClientModalData,          // ★ 추가
+  ClientModalData,
   PeriodPreset,
   ViewScope,
 } from "@/types/dashboard";
@@ -22,14 +22,14 @@ export function useDashboard() {
   const [realtime, setRealtime] = useState<RealtimeResponse | null>(null);
   const [realtimeLoading, setRealtimeLoading] = useState(false);
 
-  // ─── 추이 차트 섹션 (독립 필터) ───
+  // ─── 추이 차트 섹션 ───
   const [trend, setTrend] = useState<TrendResponse | null>(null);
   const [trendPreset, _setTrendPreset] = useState<PeriodPreset>("30d");
   const [trendCustomStart, _setTrendCustomStart] = useState("");
   const [trendCustomEnd, _setTrendCustomEnd] = useState("");
   const [trendExcludedProducts, setTrendExcludedProducts] = useState<Set<string>>(new Set());
 
-  // ─── 고객 변동 섹션 (독립 필터) ───
+  // ─── 고객 변동 섹션 ───
   const [clients, setClients] = useState<ClientChangeResponse | null>(null);
   const [clientPreset, _setClientPreset] = useState<PeriodPreset>("7d");
   const [clientCustomStart, _setClientCustomStart] = useState("");
@@ -42,7 +42,7 @@ export function useDashboard() {
   const [drilldownOpen, setDrilldownOpen] = useState(false);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
 
-  // ─── ★ 고객사 상세 모달 ───
+  // ─── 고객사 상세 모달 ───
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [clientModalData, setClientModalData] = useState<ClientModalData | null>(null);
   const [clientModalLoading, setClientModalLoading] = useState(false);
@@ -54,45 +54,36 @@ export function useDashboard() {
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ─── 추이 차트: 날짜 범위 쿼리 ───
-  const getTrendQuery = useCallback((): string => {
-    if (trendPreset === "custom" && trendCustomStart && trendCustomEnd) {
-      return `start=${trendCustomStart}&end=${trendCustomEnd}`;
-    }
-    return `preset=${trendPreset}`;
-  }, [trendPreset, trendCustomStart, trendCustomEnd]);
+  // ★ ref로 최신 필터 상태를 항상 추적 (stale closure 완전 방지)
+  const realtimeDateRef = useRef(realtimeDate);
+  realtimeDateRef.current = realtimeDate;
 
-  // ─── 고객 변동: 날짜 범위 URL ───
-  const getClientUrl = useCallback((): string => {
-    const today = getToday();
-    if (clientPreset === "custom" && clientCustomStart && clientCustomEnd) {
-      return `/api/dashboard/clients?start=${clientCustomStart}&end=${clientCustomEnd}`;
-    }
-    let start: string;
-    switch (clientPreset) {
-      case "year":
-        start = `${today.split("-")[0]}-01-01`;
-        break;
-      case "7d":
-        start = addDays(today, -6);
-        break;
-      case "30d":
-        start = addDays(today, -29);
-        break;
-      case "60d":
-        start = addDays(today, -59);
-        break;
-      case "90d":
-      default:
-        start = addDays(today, -89);
-        break;
-    }
-    return `/api/dashboard/clients?start=${start}&end=${today}`;
-  }, [clientPreset, clientCustomStart, clientCustomEnd]);
+  const trendStateRef = useRef({
+    preset: trendPreset,
+    customStart: trendCustomStart,
+    customEnd: trendCustomEnd,
+  });
+  trendStateRef.current = {
+    preset: trendPreset,
+    customStart: trendCustomStart,
+    customEnd: trendCustomEnd,
+  };
 
-  // ─── Fetch 함수들 ───
+  const clientStateRef = useRef({
+    preset: clientPreset,
+    customStart: clientCustomStart,
+    customEnd: clientCustomEnd,
+  });
+  clientStateRef.current = {
+    preset: clientPreset,
+    customStart: clientCustomStart,
+    customEnd: clientCustomEnd,
+  };
+
+  // ─── Fetch 함수들 (★ 모두 deps=[] → 참조 안정, ref에서 최신값 읽음) ───
+
   const fetchRealtime = useCallback(async (date?: string) => {
-    const targetDate = date || realtimeDate;
+    const targetDate = date || realtimeDateRef.current;
     try {
       setRealtimeLoading(true);
       const data = await apiGet<RealtimeResponse>(`/api/dashboard/realtime?date=${targetDate}`);
@@ -102,12 +93,18 @@ export function useDashboard() {
     } finally {
       setRealtimeLoading(false);
     }
-  }, [realtimeDate]);
+  }, []);
 
   const fetchTrend = useCallback(async () => {
     try {
       setTrendLoading(true);
-      const query = getTrendQuery();
+      const { preset, customStart, customEnd } = trendStateRef.current;
+      let query: string;
+      if (preset === "custom" && customStart && customEnd) {
+        query = `start=${customStart}&end=${customEnd}`;
+      } else {
+        query = `preset=${preset}`;
+      }
       const data = await apiGet<TrendResponse>(`/api/dashboard/trend?${query}`);
       setTrend(data);
     } catch (err) {
@@ -115,12 +112,38 @@ export function useDashboard() {
     } finally {
       setTrendLoading(false);
     }
-  }, [getTrendQuery]);
+  }, []);
 
   const fetchClients = useCallback(async () => {
     try {
       setClientsLoading(true);
-      const url = getClientUrl();
+      const { preset, customStart, customEnd } = clientStateRef.current;
+      const today = getToday();
+      let url: string;
+      if (preset === "custom" && customStart && customEnd) {
+        url = `/api/dashboard/clients?start=${customStart}&end=${customEnd}`;
+      } else {
+        let start: string;
+        switch (preset) {
+          case "year":
+            start = `${today.split("-")[0]}-01-01`;
+            break;
+          case "7d":
+            start = addDays(today, -6);
+            break;
+          case "30d":
+            start = addDays(today, -29);
+            break;
+          case "60d":
+            start = addDays(today, -59);
+            break;
+          case "90d":
+          default:
+            start = addDays(today, -89);
+            break;
+        }
+        url = `/api/dashboard/clients?start=${start}&end=${today}`;
+      }
       const data = await apiGet<ClientChangeResponse>(url);
       setClients(data);
     } catch (err) {
@@ -128,7 +151,7 @@ export function useDashboard() {
     } finally {
       setClientsLoading(false);
     }
-  }, [getClientUrl]);
+  }, []);
 
   // ─── 전체 새로고침 ───
   const refreshAll = useCallback(async () => {
@@ -142,7 +165,7 @@ export function useDashboard() {
     await fetchRealtime();
   }, [fetchRealtime]);
 
-  // ─── 드릴다운 ───
+  // ─── 드릴다운 (트렌드 차트 fetch를 트리거하지 않음) ───
   const openDrilldown = useCallback(async (date: string) => {
     setDrilldownDate(date);
     setDrilldownOpen(true);
@@ -166,7 +189,7 @@ export function useDashboard() {
     setDrilldownDetail(null);
   }, []);
 
-  // ─── ★ 고객사 상세 모달 핸들러 ───
+  // ─── 고객사 상세 모달 ───
   const openClientModal = useCallback(async (accountId: number) => {
     setClientModalOpen(true);
     setClientModalLoading(true);
@@ -191,7 +214,6 @@ export function useDashboard() {
 
   // ─── 추이 차트 필터 핸들러 ───
   const setTrendPreset = useCallback((p: PeriodPreset) => {
-    setTrendLoading(true);
     _setTrendPreset(p);
     if (p !== "custom") {
       _setTrendCustomStart("");
@@ -200,7 +222,6 @@ export function useDashboard() {
   }, []);
 
   const setTrendCustomRange = useCallback((start: string, end: string) => {
-    setTrendLoading(true);
     _setTrendPreset("custom");
     _setTrendCustomStart(start);
     _setTrendCustomEnd(end);
@@ -209,18 +230,14 @@ export function useDashboard() {
   const toggleTrendProduct = useCallback((productName: string) => {
     setTrendExcludedProducts((prev) => {
       const next = new Set(prev);
-      if (next.has(productName)) {
-        next.delete(productName);
-      } else {
-        next.add(productName);
-      }
+      if (next.has(productName)) next.delete(productName);
+      else next.add(productName);
       return next;
     });
   }, []);
 
   // ─── 고객 변동 필터 핸들러 ───
   const setClientPreset = useCallback((p: PeriodPreset) => {
-    setClientsLoading(true);
     _setClientPreset(p);
     if (p !== "custom") {
       _setClientCustomStart("");
@@ -229,7 +246,6 @@ export function useDashboard() {
   }, []);
 
   const setClientCustomRange = useCallback((start: string, end: string) => {
-    setClientsLoading(true);
     _setClientPreset("custom");
     _setClientCustomStart(start);
     _setClientCustomEnd(end);
@@ -254,7 +270,7 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeDate]);
 
-  // ─── 추이 차트 필터 변경 시 재조회 (독립) ───
+  // ─── 추이 차트: 필터 상태값이 변할 때만 재조회 ───
   useEffect(() => {
     if (realtime) {
       fetchTrend();
@@ -262,7 +278,7 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trendPreset, trendCustomStart, trendCustomEnd]);
 
-  // ─── 고객 변동 필터 변경 시 재조회 (독립) ───
+  // ─── 고객 변동: 필터 상태값이 변할 때만 재조회 ───
   useEffect(() => {
     if (realtime) {
       fetchClients();
@@ -280,17 +296,14 @@ export function useDashboard() {
   }, [refreshRealtime]);
 
   return {
-    // 데이터
     realtime,
     trend,
     clients,
 
-    // 실시간
     realtimeDate,
     setRealtimeDate,
     realtimeLoading,
 
-    // 추이 차트 필터
     trendPreset,
     trendCustomStart,
     trendCustomEnd,
@@ -299,7 +312,6 @@ export function useDashboard() {
     setTrendCustomRange,
     toggleTrendProduct,
 
-    // 고객 변동 필터
     clientPreset,
     clientCustomStart,
     clientCustomEnd,
@@ -308,7 +320,6 @@ export function useDashboard() {
     setClientCustomRange,
     setDowScope,
 
-    // 드릴다운
     drilldownDetail,
     drilldownDate,
     drilldownOpen,
@@ -316,14 +327,12 @@ export function useDashboard() {
     openDrilldown,
     closeDrilldown,
 
-    // ★ 고객사 상세 모달
     clientModalOpen,
     clientModalData,
     clientModalLoading,
     openClientModal,
     closeClientModal,
 
-    // 전체
     loading,
     trendLoading,
     clientsLoading,
