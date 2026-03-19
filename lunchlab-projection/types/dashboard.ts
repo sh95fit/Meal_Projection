@@ -284,6 +284,12 @@ export interface ClientChange {
   mainProduct: string;
   /** 상품별 일평균 수량 */
   productAvgs: { productName: string; avg: number }[];
+  /** 이탈 고객: 이용 종료일 (terminate_at) */
+  terminateAt: string | null;
+  /** 신규 고객: 구독 전환일 (subscription_at) */
+  subscriptionAt: string | null;
+  /** 전환예정 고객: 전환 예정일 (subscription_scheduled_at) */
+  subscriptionScheduledAt: string | null;
 }
 
 /**

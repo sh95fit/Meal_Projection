@@ -1211,9 +1211,7 @@ export async function getClientChangeData(
       orderStatsMap.set(Number(row.account_id), {
         avgQty: Number(row.avg_qty) || 0,
         mainProduct: "",
-        lastOrderDate: row.last_order_date
-          ? String(row.last_order_date).slice(0, 10)
-          : "",
+        lastOrderDate: toDateStr(row.last_order_date) ?? "",
         productAvgs: [],
       });
     }
@@ -1264,6 +1262,28 @@ export async function getClientChangeData(
   // 4) changes 배열 구성
   // ═══════════════════════════════════════
 
+  // 날짜 포맷 헬퍼 (YYYY-MM-DD 형태로 통일)
+  function toDateStr(val: unknown): string | null {
+    if (!val) return null;
+    if (val instanceof Date) {
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, "0");
+      const d = String(val.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+    const str = String(val);
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, "0");
+      const d = String(parsed.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+    return null;
+  }
+  
+  // changes 배열 구성
   const changes: ClientChange[] = [];
 
   for (const row of churnedRows) {
@@ -1278,6 +1298,9 @@ export async function getClientChangeData(
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
       productAvgs: stats?.productAvgs ?? [],
+      terminateAt: toDateStr(row.terminate_at),
+      subscriptionAt: toDateStr(row.subscription_at),
+      subscriptionScheduledAt: null,
     });
   }
 
@@ -1293,6 +1316,9 @@ export async function getClientChangeData(
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
       productAvgs: stats?.productAvgs ?? [],
+      terminateAt: null,
+      subscriptionAt: toDateStr(row.subscription_at),
+      subscriptionScheduledAt: null,
     });
   }
 
@@ -1308,6 +1334,9 @@ export async function getClientChangeData(
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
       productAvgs: stats?.productAvgs ?? [],
+      terminateAt: null,
+      subscriptionAt: null,
+      subscriptionScheduledAt: toDateStr(row.subscription_scheduled_at),
     });
   }
 
