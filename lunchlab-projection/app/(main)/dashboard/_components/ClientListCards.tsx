@@ -1,14 +1,15 @@
-// app/(main)/dashboard/_components/ClientListCards.tsx
+// app/(main)/dashboard/_components/ClientListCards.tsx (전체 교체)
 "use client";
 
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { median } from "@/lib/utils/format";
 import type { ClientChangeResponse, ClientChange } from "@/types/dashboard";
 
 interface Props {
   data: ClientChangeResponse;
-  onClientClick: (accountId: number, type?: string) => void; 
+  onClientClick: (accountId: number, type?: string) => void;
 }
 
 const GROUPS = [
@@ -58,18 +59,6 @@ function DateInfo({ c }: { c: ClientChange }) {
       )}
     </div>
   );
-}
-
-/** 중간값 계산 */
-function median(arr: number[]): number {
-  if (arr.length === 0) return 0;
-  const sorted = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const val =
-    sorted.length % 2 === 0
-      ? (sorted[mid - 1] + sorted[mid]) / 2
-      : sorted[mid];
-  return Math.round(val * 10) / 10;
 }
 
 export function ClientListCards({ data, onClientClick }: Props) {

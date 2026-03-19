@@ -1,7 +1,7 @@
-// app/api/dashboard/clients/route.ts (전체 교체)
+// app/api/dashboard/clients/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/services/authService";
-import { getClientChangeData } from "@/lib/repositories/dashboardQueryRepository";
+import { getClientChangeData } from "@/lib/repositories/clientRepository";
 import { getToday, addDays } from "@/lib/utils/date";
 
 export async function GET(request: NextRequest) {
@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
     const result = await getClientChangeData(start, end, prevStart, prevEnd);
     return NextResponse.json(result);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Internal Server Error";
+    const message =
+      err instanceof Error ? err.message : "Internal Server Error";
     if (message === "Unauthorized") {
       return NextResponse.json({ error: message }, { status: 401 });
     }
