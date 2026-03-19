@@ -832,10 +832,11 @@ export async function getDrilldownDetailData(
   const dowCountRows = await queryMySQL(
     `SELECT o.account_id, COUNT(DISTINCT o.delivery_date) AS cnt
      FROM orders o
+     JOIN accounts a ON a.id = o.account_id
      WHERE o.deleted_at IS NULL
-       AND o.delivery_date >= '${DATA_START_DATE}'
        AND o.delivery_date <= ?
        AND DAYOFWEEK(o.delivery_date) = ?
+       AND (a.subscription_at IS NULL OR o.delivery_date >= a.subscription_at)
      GROUP BY o.account_id`,
     [targetDate, mysqlDow]
   );
