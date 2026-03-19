@@ -3,6 +3,11 @@
 // 고객사 데이터 조회 리포지토리
 // - 고객사 상세 모달 데이터 (getClientModalData)
 // - 고객 변동 현황 조회 (getClientChangeData)
+//
+// [리팩토링 변경사항]
+// - 상수 → lib/constants/dashboard.ts에서 import (중복 제거)
+// - medianOf 삭제 → format.ts의 median + medianSum 헬퍼로 대체
+// - getClientChangeData: 직렬 MySQL 쿼리 → Promise.all 병렬화
 // ──────────────────────────────────────────────────────────────────
 
 import { queryMySQL } from "@/lib/mysql/client";
@@ -12,6 +17,11 @@ import { getOrdersByDate } from "@/lib/repositories/dashboardQueryRepository";
 import { getProductColorMap } from "@/lib/repositories/productRepository";
 import { PRESET_COLORS } from "@/lib/utils/color";
 import { toDateStr, parseOrderDay, median } from "@/lib/utils/format";
+import {
+  DATA_START_DATE,
+  DAY_NAMES,
+  DOW_LABELS,
+} from "@/lib/constants/dashboard";
 import type {
   ClientModalData,
   MergedOrder,
@@ -21,46 +31,23 @@ import type {
   ClientChangeResponse,
 } from "@/types/dashboard";
 
-// ──────────────────────────────────────────────────────────────────
-// 상수
-// ──────────────────────────────────────────────────────────────────
-
-/** 데이터 시작일 — 이전 데이터 제외 */
-const DATA_START_DATE = "2025-09-01";
-
-/**
- * JS Date.getDay() → 영문 요일 약어
- * getDay(): 0=일, 1=월, ..., 6=토
- */
-const DAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-
-/** 한글 요일 레이블 (Date.getDay() 인덱스 순) */
-const DOW_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
-
-// ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
 // 내부 유틸
-// ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
 
 /**
- * 숫자 배열의 중간값을 반환합니다.
- * format.ts의 median과 달리, 이 함수는 dowFlows 계산 전용 내부 헬퍼입니다.
+ * 숫자 배열의 중간값 × 배열 길이를 반환합니다.
+ * dowFlows의 "중간값 식수 합계" 계산 전용.
  */
-function medianOf(arr: number[]): number {
+function medianSum(arr: number[]): number {
   if (arr.length === 0) return 0;
-  const sorted = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0
-    ? sorted[mid]
-    : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+  return Math.round(median(arr) * arr.length * 10) / 10;
 }
 
 // ══════════════════════════════════════════════════════════════════
 // 내부 유틸: groupByCompany
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * MergedOrder[]를 고객사별로 그룹핑하여 요약 통계를 계산합니다.
- */
 interface CompanySummary {
   accountId: number;
   accountName: string;
@@ -130,28 +117,13 @@ function groupByCompany(
 // 고객사 상세 모달 데이터 조회
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * 고객사 상세 모달에 필요한 전체 데이터를 조회합니다.
- *
- * 조회 항목:
- *   1) 계정 기본 정보 (이름, 주문요일, 구독/종료/전환 날짜)
- *   2) 첫/마지막 주문일, 총 주문 횟수
- *   3) 서비스 이용일 계산
- *   4) 전체 기간 일별 수량 → 평균/중간값
- *   5) 전체 기간 상품별 일별 수량 → 상품별 평균/중간값
- *   6) 상품 목록 + 색상
- *   7) 최근 30영업일 추이 데이터 (차트용)
- *
- * @param accountId   accounts.id
- * @param clientType  "churned" | "new" | "converted"
- */
 export async function getClientModalData(
   accountId: number,
   clientType: string = "churned"
 ): Promise<ClientModalData> {
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   // 1) 계정 정보 조회
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   const accountRows = (await queryMySQL(
     `SELECT name, order_day, subscription_at, terminate_at, subscription_scheduled_at
      FROM accounts WHERE id = ?`,
@@ -163,11 +135,11 @@ export async function getClientModalData(
   const terminateAt = toDateStr(acct.terminate_at);
   const subscriptionScheduledAt = toDateStr(acct.subscription_scheduled_at);
   const dbAccountName = acct.name ? String(acct.name) : null;
-  const orderDays = parseOrderDay(acct.order_day, true); // 한글 변환
+  const orderDays = parseOrderDay(acct.order_day, true);
 
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   // 2) 첫/마지막 주문일 + 총 주문 횟수
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   const dateRows = (await queryMySQL(
     `SELECT MIN(o.delivery_date) AS first_date,
             MAX(o.delivery_date) AS last_date,
@@ -181,25 +153,27 @@ export async function getClientModalData(
   const lastOrderDate = toDateStr(dateRows[0]?.last_date);
   const totalOrders = Number(dateRows[0]?.total_orders) || 0;
 
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   // 3) 총 서비스 이용일 계산
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   let serviceDays: number | null = null;
   if (clientType === "churned" && subscriptionAt && terminateAt) {
     serviceDays = Math.round(
-      (new Date(terminateAt).getTime() - new Date(subscriptionAt).getTime()) /
+      (new Date(terminateAt).getTime() -
+        new Date(subscriptionAt).getTime()) /
         (1000 * 60 * 60 * 24)
     );
   } else if (clientType === "new" && subscriptionAt) {
     serviceDays = Math.round(
-      (new Date(getToday()).getTime() - new Date(subscriptionAt).getTime()) /
+      (new Date(getToday()).getTime() -
+        new Date(subscriptionAt).getTime()) /
         (1000 * 60 * 60 * 24)
     );
   }
 
-  // ══════════════════════════════════════════
-  // 4) 전체 기간 일별 수량 (전체 평균/중간값 산출용)
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
+  // 4) 전체 기간 일별 수량
+  // ═══════════════════════════════════════
   const allDailyRows = (await queryMySQL(
     `SELECT o.delivery_date,
             CAST(SUM(od.quantity) AS SIGNED) AS day_qty
@@ -225,9 +199,9 @@ export async function getClientModalData(
       : 0;
   const medianQty = median(allQtyList);
 
-  // ══════════════════════════════════════════
-  // 5) 전체 기간 상품별 일별 수량 (상품별 평균/중간값 산출용)
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
+  // 5) 전체 기간 상품별 일별 수량
+  // ═══════════════════════════════════════
   const allProductDailyRows = (await queryMySQL(
     `SELECT o.delivery_date,
             od.product_id,
@@ -241,9 +215,9 @@ export async function getClientModalData(
     [accountId]
   )) as Record<string, unknown>[];
 
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   // 6) 상품 목록 + 색상
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   const colorMap = await getProductColorMap();
   const supabase = await createClient();
   const { data: products } = await supabase
@@ -256,11 +230,11 @@ export async function getClientModalData(
     const name = String(p.product_name);
     return {
       productName: name,
-      color: colorMap.get(name) || PRESET_COLORS[idx % PRESET_COLORS.length],
+      color:
+        colorMap.get(name) || PRESET_COLORS[idx % PRESET_COLORS.length],
     };
   });
 
-  // external_id → productName 매핑 (web 채널 기준)
   const extIdToName = new Map<string, string>();
   for (const p of products || []) {
     const raw = p as Record<string, unknown>;
@@ -275,9 +249,9 @@ export async function getClientModalData(
     }
   }
 
-  // ══════════════════════════════════════════
-  // 7) 상품별 평균 / 중간값 (전체 기간)
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
+  // 7) 상품별 평균 / 중간값
+  // ═══════════════════════════════════════
   const productDailyMap = new Map<string, number[]>();
   for (const row of allProductDailyRows) {
     const extId = String(row.product_id);
@@ -300,17 +274,17 @@ export async function getClientModalData(
     return { productName: pl.productName, avg, median: median(qtyArr) };
   });
 
-  // ══════════════════════════════════════════
-  // 8) 최근 30영업일 추이 데이터 (차트용)
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
+  // 8) 최근 30영업일 추이 데이터
+  // ═══════════════════════════════════════
   const today = getToday();
   const allDates: string[] = [];
   let cursor = addDays(today, -45);
   while (cursor <= today) {
     const [y, m, d] = cursor.split("-").map(Number);
     const dateObj = new Date(y, m - 1, d);
-    const dow = dateObj.getDay();
-    if (dow >= 1 && dow <= 6) allDates.push(cursor); // 월~토
+    const dayOfWeek = dateObj.getDay();
+    if (dayOfWeek >= 1 && dayOfWeek <= 6) allDates.push(cursor);
     cursor = addDays(cursor, 1);
   }
   const recentDates = allDates.slice(-30);
@@ -324,32 +298,31 @@ export async function getClientModalData(
     })
   );
 
-  const recentTrend: ClientModalData["recentTrend"] = recentDates.map((d) => {
-    const found = dailyResults.find((r) => r.date === d);
-    const row: ClientModalData["recentTrend"][number] = {
-      date: d,
-      qty: found?.qty || 0,
-    };
-    for (const pl of productList) {
-      row[pl.productName] = (found?.orders || [])
-        .filter((o) => o.productName === pl.productName)
-        .reduce((s, o) => s + o.quantity, 0);
+  const recentTrend: ClientModalData["recentTrend"] = recentDates.map(
+    (d) => {
+      const found = dailyResults.find((r) => r.date === d);
+      const row: ClientModalData["recentTrend"][number] = {
+        date: d,
+        qty: found?.qty || 0,
+      };
+      for (const pl of productList) {
+        row[pl.productName] = (found?.orders || [])
+          .filter((o) => o.productName === pl.productName)
+          .reduce((s, o) => s + o.quantity, 0);
+      }
+      return row;
     }
-    return row;
-  });
+  );
 
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   // 9) 고객사명
-  // ══════════════════════════════════════════
+  // ═══════════════════════════════════════
   const orderedDays = dailyResults.filter((d) => d.qty > 0);
   const accountName =
     dbAccountName ||
     orderedDays[0]?.orders[0]?.accountName ||
     `고객사 #${accountId}`;
 
-  // ══════════════════════════════════════════
-  // 응답
-  // ══════════════════════════════════════════
   return {
     accountId,
     accountName,
@@ -374,21 +347,6 @@ export async function getClientModalData(
 // 고객 변동 현황 조회
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * 고객 변동 현황을 조회합니다.
- *
- * 분류 기준 (accounts 테이블 기반):
- *   - 이탈(churned): status='disabled' AND terminate_at이 현재 기간 내
- *   - 신규(new): status='available' AND subscription_at이 현재 기간 내
- *   - 전환예정(converted): status='scheduled' AND subscription_scheduled_at이 현재 기간 내
- *
- * 전기 대비 증감: prevStart~prevEnd 기간의 동일 조건 카운트와 비교
- *
- * @param startDate     현재 기간 시작일
- * @param endDate       현재 기간 종료일
- * @param prevStartDate 이전 기간 시작일
- * @param prevEndDate   이전 기간 종료일
- */
 export async function getClientChangeData(
   startDate: string,
   endDate: string,
@@ -396,66 +354,66 @@ export async function getClientChangeData(
   prevEndDate: string
 ): Promise<ClientChangeResponse> {
   // ═══════════════════════════════════════
-  // 1) 현재 기간 이탈/신규/전환예정 조회
+  // 1) 현재 기간 이탈/신규/전환예정 — ★ 3개 병렬
   // ═══════════════════════════════════════
 
-  const churnedRows = (await queryMySQL(
-    `SELECT a.id, a.name, a.status, a.terminate_at,
-            a.subscription_at, a.order_day
-     FROM accounts a
-     WHERE a.status = 'disabled'
-       AND a.terminate_at IS NOT NULL
-       AND a.terminate_at >= ?
-       AND a.terminate_at <= ?
-       AND a.subscription_at IS NOT NULL`,
-    [startDate, endDate]
-  )) as Record<string, unknown>[];
-
-  const newRows = (await queryMySQL(
-    `SELECT a.id, a.name, a.status, a.subscription_at, a.order_day
-     FROM accounts a
-     WHERE a.status = 'available'
-       AND a.subscription_at >= ?
-       AND a.subscription_at <= ?`,
-    [startDate, endDate]
-  )) as Record<string, unknown>[];
-
-  const convertedRows = (await queryMySQL(
-    `SELECT a.id, a.name, a.status,
-            a.subscription_scheduled_at, a.order_day
-     FROM accounts a
-     WHERE a.status = 'scheduled'
-       AND a.subscription_scheduled_at >= ?
-       AND a.subscription_scheduled_at <= ?`,
-    [startDate, endDate]
-  )) as Record<string, unknown>[];
+  const [churnedRows, newRows, convertedRows] = (await Promise.all([
+    queryMySQL(
+      `SELECT a.id, a.name, a.status, a.terminate_at,
+              a.subscription_at, a.order_day
+       FROM accounts a
+       WHERE a.status = 'disabled'
+         AND a.terminate_at IS NOT NULL
+         AND a.terminate_at >= ?
+         AND a.terminate_at <= ?
+         AND a.subscription_at IS NOT NULL`,
+      [startDate, endDate]
+    ),
+    queryMySQL(
+      `SELECT a.id, a.name, a.status, a.subscription_at, a.order_day
+       FROM accounts a
+       WHERE a.status = 'available'
+         AND a.subscription_at >= ?
+         AND a.subscription_at <= ?`,
+      [startDate, endDate]
+    ),
+    queryMySQL(
+      `SELECT a.id, a.name, a.status,
+              a.subscription_scheduled_at, a.order_day
+       FROM accounts a
+       WHERE a.status = 'scheduled'
+         AND a.subscription_scheduled_at >= ?
+         AND a.subscription_scheduled_at <= ?`,
+      [startDate, endDate]
+    ),
+  ])) as [Record<string, unknown>[], Record<string, unknown>[], Record<string, unknown>[]];
 
   // ═══════════════════════════════════════
-  // 2) 이전 기간 카운트 (증감 비교용)
+  // 2) 이전 기간 카운트 — ★ 3개 병렬
   // ═══════════════════════════════════════
 
-  const prevChurnedRows = (await queryMySQL(
-    `SELECT COUNT(*) AS cnt FROM accounts
-     WHERE status = 'disabled'
-       AND subscription_at IS NOT NULL
-       AND terminate_at IS NOT NULL
-       AND terminate_at >= ? AND terminate_at <= ?`,
-    [prevStartDate, prevEndDate]
-  )) as Record<string, unknown>[];
-
-  const prevNewRows = (await queryMySQL(
-    `SELECT COUNT(*) AS cnt FROM accounts
-     WHERE status = 'available'
-       AND subscription_at >= ? AND subscription_at <= ?`,
-    [prevStartDate, prevEndDate]
-  )) as Record<string, unknown>[];
-
-  const prevConvertedRows = (await queryMySQL(
-    `SELECT COUNT(*) AS cnt FROM accounts
-     WHERE status = 'scheduled'
-       AND subscription_scheduled_at >= ? AND subscription_scheduled_at <= ?`,
-    [prevStartDate, prevEndDate]
-  )) as Record<string, unknown>[];
+  const [prevChurnedRows, prevNewRows, prevConvertedRows] = (await Promise.all([
+    queryMySQL(
+      `SELECT COUNT(*) AS cnt FROM accounts
+       WHERE status = 'disabled'
+         AND subscription_at IS NOT NULL
+         AND terminate_at IS NOT NULL
+         AND terminate_at >= ? AND terminate_at <= ?`,
+      [prevStartDate, prevEndDate]
+    ),
+    queryMySQL(
+      `SELECT COUNT(*) AS cnt FROM accounts
+       WHERE status = 'available'
+         AND subscription_at >= ? AND subscription_at <= ?`,
+      [prevStartDate, prevEndDate]
+    ),
+    queryMySQL(
+      `SELECT COUNT(*) AS cnt FROM accounts
+       WHERE status = 'scheduled'
+         AND subscription_scheduled_at >= ? AND subscription_scheduled_at <= ?`,
+      [prevStartDate, prevEndDate]
+    ),
+  ])) as [Record<string, unknown>[], Record<string, unknown>[], Record<string, unknown>[]];
 
   // ═══════════════════════════════════════
   // 3) 각 고객사의 주문 통계 보강
@@ -480,25 +438,45 @@ export async function getClientChangeData(
   if (allAccountIds.length > 0) {
     const placeholders = allAccountIds.map(() => "?").join(",");
 
-    // 평균 수량 & 마지막 주문일
-    const statsRows = (await queryMySQL(
-      `SELECT daily.account_id,
-              ROUND(AVG(daily.day_total), 1) AS avg_qty,
-              MAX(daily.delivery_date) AS last_order_date
-       FROM (
-         SELECT o.account_id, o.delivery_date,
-                SUM(od.quantity) AS day_total
-         FROM orders o
-         JOIN \`order-details\` od ON od.order_id = o.id
-         WHERE o.account_id IN (${placeholders})
-           AND o.deleted_at IS NULL AND od.deleted_at IS NULL
-           AND o.delivery_date >= '${DATA_START_DATE}'
-           AND od.product_id <> 21
-         GROUP BY o.account_id, o.delivery_date
-       ) AS daily
-       GROUP BY daily.account_id`,
-      allAccountIds
-    )) as Record<string, unknown>[];
+    // ★ 통계 + 상품별 평균 병렬 조회
+    const [statsRows, productAvgRows] = (await Promise.all([
+      queryMySQL(
+        `SELECT daily.account_id,
+                ROUND(AVG(daily.day_total), 1) AS avg_qty,
+                MAX(daily.delivery_date) AS last_order_date
+         FROM (
+           SELECT o.account_id, o.delivery_date,
+                  SUM(od.quantity) AS day_total
+           FROM orders o
+           JOIN \`order-details\` od ON od.order_id = o.id
+           WHERE o.account_id IN (${placeholders})
+             AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+             AND o.delivery_date >= '${DATA_START_DATE}'
+             AND od.product_id <> 21
+           GROUP BY o.account_id, o.delivery_date
+         ) AS daily
+         GROUP BY daily.account_id`,
+        allAccountIds
+      ),
+      queryMySQL(
+        `SELECT daily.account_id, daily.product_name,
+                ROUND(AVG(daily.day_total), 1) AS avg_qty
+         FROM (
+           SELECT o.account_id, od.product_name, o.delivery_date,
+                  SUM(od.quantity) AS day_total
+           FROM orders o
+           JOIN \`order-details\` od ON od.order_id = o.id
+           WHERE o.account_id IN (${placeholders})
+             AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+             AND o.delivery_date >= '${DATA_START_DATE}'
+             AND od.product_id <> 21
+           GROUP BY o.account_id, od.product_name, o.delivery_date
+         ) AS daily
+         GROUP BY daily.account_id, daily.product_name
+         ORDER BY daily.account_id, avg_qty DESC`,
+        allAccountIds
+      ),
+    ])) as [Record<string, unknown>[], Record<string, unknown>[]];
 
     for (const row of statsRows) {
       orderStatsMap.set(Number(row.account_id), {
@@ -509,28 +487,10 @@ export async function getClientChangeData(
       });
     }
 
-    // 상품별 일평균 수량 계산
-    const productAvgRows = (await queryMySQL(
-      `SELECT daily.account_id, daily.product_name,
-              ROUND(AVG(daily.day_total), 1) AS avg_qty
-       FROM (
-         SELECT o.account_id, od.product_name, o.delivery_date,
-                SUM(od.quantity) AS day_total
-         FROM orders o
-         JOIN \`order-details\` od ON od.order_id = o.id
-         WHERE o.account_id IN (${placeholders})
-           AND o.deleted_at IS NULL AND od.deleted_at IS NULL
-           AND o.delivery_date >= '${DATA_START_DATE}'
-           AND od.product_id <> 21
-         GROUP BY o.account_id, od.product_name, o.delivery_date
-       ) AS daily
-       GROUP BY daily.account_id, daily.product_name
-       ORDER BY daily.account_id, avg_qty DESC`,
-      allAccountIds
-    )) as Record<string, unknown>[];
-
-    // 고객사별 상품 평균 배열 구성 + 주력 상품(1위) 설정
-    const tempMap = new Map<number, { productName: string; avg: number }[]>();
+    const tempMap = new Map<
+      number,
+      { productName: string; avg: number }[]
+    >();
     for (const row of productAvgRows) {
       const aid = Number(row.account_id);
       if (!tempMap.has(aid)) tempMap.set(aid, []);
@@ -540,12 +500,12 @@ export async function getClientChangeData(
       });
     }
 
-    for (const [aid, products] of tempMap) {
+    for (const [aid, prods] of tempMap) {
       const existing = orderStatsMap.get(aid);
       if (existing) {
-        existing.productAvgs = products;
-        if (products.length > 0) {
-          existing.mainProduct = products[0].productName;
+        existing.productAvgs = prods;
+        if (prods.length > 0) {
+          existing.mainProduct = prods[0].productName;
         }
       }
     }
@@ -612,53 +572,40 @@ export async function getClientChangeData(
   }
 
   // ═══════════════════════════════════════
-  // 5) 요일별 순변화 (dowFlows) — 평균/중간값 식수 합계
+  // 5) 요일별 순변화 (dowFlows)
   // ═══════════════════════════════════════
 
   const dowFlows: DowFlow[] = [];
-
-  // 토요일 포함: 월(1)~토(6)
   const weekdayIndices = [1, 2, 3, 4, 5, 6];
 
   for (const dayIdx of weekdayIndices) {
-    const dowName = DAY_NAMES[dayIdx]; // "mon", "tue", ...
-    const dowLabel = DOW_LABELS[dayIdx]; // "월", "화", ...
+    const dowName = DAY_NAMES[dayIdx];
+    const dowLabel = DOW_LABELS[dayIdx];
 
-    // ── 이탈 고객 중 해당 요일이 order_day에 포함된 고객사 ──
     const churnedOnDay = churnedRows.filter((r) => {
       const days = parseOrderDay(r.order_day);
       return days.includes(dowName);
     });
 
-    // ── 신규 고객 중 해당 요일이 order_day에 포함된 고객사 ──
     const newOnDay = newRows.filter((r) => {
       const days = parseOrderDay(r.order_day);
       return days.includes(dowName);
     });
 
-    // 이탈 - 전체 평균/중간값 식수 합계
     const churnedAvgs = churnedOnDay.map(
       (r) => orderStatsMap.get(Number(r.id))?.avgQty ?? 0
     );
     const churnedAvgSum =
       Math.round(churnedAvgs.reduce((s, v) => s + v, 0) * 10) / 10;
-    const churnedMedianSum =
-      churnedAvgs.length > 0
-        ? Math.round(medianOf(churnedAvgs) * churnedAvgs.length * 10) / 10
-        : 0;
+    const churnedMedianSum = medianSum(churnedAvgs);
 
-    // 신규 - 전체 평균/중간값 식수 합계
     const newAvgs = newOnDay.map(
       (r) => orderStatsMap.get(Number(r.id))?.avgQty ?? 0
     );
     const newAvgSum =
       Math.round(newAvgs.reduce((s, v) => s + v, 0) * 10) / 10;
-    const newMedianSum =
-      newAvgs.length > 0
-        ? Math.round(medianOf(newAvgs) * newAvgs.length * 10) / 10
-        : 0;
+    const newMedianSum = medianSum(newAvgs);
 
-    // ── 상품별 집계 ──
     const productMap = new Map<
       string,
       { churnedAvgs: number[]; newAvgs: number[] }
@@ -668,7 +615,10 @@ export async function getClientChangeData(
       const stats = orderStatsMap.get(Number(r.id));
       for (const pa of stats?.productAvgs ?? []) {
         if (!productMap.has(pa.productName)) {
-          productMap.set(pa.productName, { churnedAvgs: [], newAvgs: [] });
+          productMap.set(pa.productName, {
+            churnedAvgs: [],
+            newAvgs: [],
+          });
         }
         productMap.get(pa.productName)!.churnedAvgs.push(pa.avg);
       }
@@ -678,32 +628,26 @@ export async function getClientChangeData(
       const stats = orderStatsMap.get(Number(r.id));
       for (const pa of stats?.productAvgs ?? []) {
         if (!productMap.has(pa.productName)) {
-          productMap.set(pa.productName, { churnedAvgs: [], newAvgs: [] });
+          productMap.set(pa.productName, {
+            churnedAvgs: [],
+            newAvgs: [],
+          });
         }
         productMap.get(pa.productName)!.newAvgs.push(pa.avg);
       }
     }
 
-    const products: DowFlowProductDetail[] = Array.from(
+    const productsArr: DowFlowProductDetail[] = Array.from(
       productMap.entries()
     ).map(([name, data]) => ({
       productName: name,
       churnedAvgSum:
-        Math.round(data.churnedAvgs.reduce((s, v) => s + v, 0) * 10) / 10,
-      churnedMedianSum:
-        data.churnedAvgs.length > 0
-          ? Math.round(
-              medianOf(data.churnedAvgs) * data.churnedAvgs.length * 10
-            ) / 10
-          : 0,
+        Math.round(data.churnedAvgs.reduce((s, v) => s + v, 0) * 10) /
+        10,
+      churnedMedianSum: medianSum(data.churnedAvgs),
       newAvgSum:
         Math.round(data.newAvgs.reduce((s, v) => s + v, 0) * 10) / 10,
-      newMedianSum:
-        data.newAvgs.length > 0
-          ? Math.round(
-              medianOf(data.newAvgs) * data.newAvgs.length * 10
-            ) / 10
-          : 0,
+      newMedianSum: medianSum(data.newAvgs),
     }));
 
     dowFlows.push({
@@ -714,13 +658,14 @@ export async function getClientChangeData(
       newAvgSum,
       newMedianSum,
       netAvg: Math.round((newAvgSum - churnedAvgSum) * 10) / 10,
-      netMedian: Math.round((newMedianSum - churnedMedianSum) * 10) / 10,
-      products,
+      netMedian:
+        Math.round((newMedianSum - churnedMedianSum) * 10) / 10,
+      products: productsArr,
     });
   }
 
   // ═══════════════════════════════════════
-  // 6) summary (증감 포함)
+  // 6) summary
   // ═══════════════════════════════════════
 
   const churnedCount = churnedRows.length;
