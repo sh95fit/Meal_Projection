@@ -83,9 +83,9 @@ export function useDashboard() {
   // ★ 초기 로드 완료 여부 (useEffect 가드용)
   const initializedRef = useRef(false);
 
-  // ★ debounce 타이머 ref (다중 state 변경이 한 번의 fetch로 합쳐짐)
-  const trendDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clientDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ★ 마지막으로 fetch한 쿼리 문자열을 기억 → 동일 쿼리 중복 방지
+  const lastTrendQueryRef = useRef<string>("");
+  const lastClientQueryRef = useRef<string>("");
 
   // ─── Fetch 함수들 (모두 deps=[] → 참조 안정) ───
 
@@ -102,16 +102,25 @@ export function useDashboard() {
     }
   }, []);
 
-  const fetchTrend = useCallback(async () => {
+  const fetchTrend = useCallback(async (force?: boolean) => {
+    const { preset, customStart, customEnd } = trendStateRef.current;
+
+    // ★ custom 모드인데 날짜가 불완전하면 fetch하지 않음
+    if (preset === "custom" && (!customStart || !customEnd)) return;
+
+    let query: string;
+    if (preset === "custom" && customStart && customEnd) {
+      query = `start=${customStart}&end=${customEnd}`;
+    } else {
+      query = `preset=${preset}`;
+    }
+
+    // ★ 동일 쿼리면 skip (force=true일 때는 무시)
+    if (!force && query === lastTrendQueryRef.current) return;
+    lastTrendQueryRef.current = query;
+
     try {
       setTrendLoading(true);
-      const { preset, customStart, customEnd } = trendStateRef.current;
-      let query: string;
-      if (preset === "custom" && customStart && customEnd) {
-        query = `start=${customStart}&end=${customEnd}`;
-      } else {
-        query = `preset=${preset}`;
-      }
       const data = await apiGet<TrendResponse>(`/api/dashboard/trend?${query}`);
       setTrend(data);
     } catch (err) {
@@ -121,36 +130,45 @@ export function useDashboard() {
     }
   }, []);
 
-  const fetchClients = useCallback(async () => {
+  const fetchClients = useCallback(async (force?: boolean) => {
+    const { preset, customStart, customEnd } = clientStateRef.current;
+
+    // ★ custom 모드인데 날짜가 불완전하면 fetch하지 않음
+    if (preset === "custom" && (!customStart || !customEnd)) return;
+
+    const today = getToday();
+    let url: string;
+    if (preset === "custom" && customStart && customEnd) {
+      url = `/api/dashboard/clients?start=${customStart}&end=${customEnd}`;
+    } else {
+      let start: string;
+      switch (preset) {
+        case "year":
+          start = `${today.split("-")[0]}-01-01`;
+          break;
+        case "7d":
+          start = addDays(today, -6);
+          break;
+        case "30d":
+          start = addDays(today, -29);
+          break;
+        case "60d":
+          start = addDays(today, -59);
+          break;
+        case "90d":
+        default:
+          start = addDays(today, -89);
+          break;
+      }
+      url = `/api/dashboard/clients?start=${start}&end=${today}`;
+    }
+
+    // ★ 동일 쿼리면 skip (force=true일 때는 무시)
+    if (!force && url === lastClientQueryRef.current) return;
+    lastClientQueryRef.current = url;
+
     try {
       setClientsLoading(true);
-      const { preset, customStart, customEnd } = clientStateRef.current;
-      const today = getToday();
-      let url: string;
-      if (preset === "custom" && customStart && customEnd) {
-        url = `/api/dashboard/clients?start=${customStart}&end=${customEnd}`;
-      } else {
-        let start: string;
-        switch (preset) {
-          case "year":
-            start = `${today.split("-")[0]}-01-01`;
-            break;
-          case "7d":
-            start = addDays(today, -6);
-            break;
-          case "30d":
-            start = addDays(today, -29);
-            break;
-          case "60d":
-            start = addDays(today, -59);
-            break;
-          case "90d":
-          default:
-            start = addDays(today, -89);
-            break;
-        }
-        url = `/api/dashboard/clients?start=${start}&end=${today}`;
-      }
       const data = await apiGet<ClientChangeResponse>(url);
       setClients(data);
     } catch (err) {
@@ -164,7 +182,8 @@ export function useDashboard() {
   const refreshAll = useCallback(async () => {
     setLoading(true);
     await fetchRealtime();
-    await Promise.all([fetchTrend(), fetchClients()]);
+    // ★ force=true로 중복 방지 우회
+    await Promise.all([fetchTrend(true), fetchClients(true)]);
     initializedRef.current = true;
     setLoading(false);
   }, [fetchRealtime, fetchTrend, fetchClients]);
@@ -278,33 +297,23 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeDate]);
 
-  // ─── ★ 추이 차트: debounce로 다중 state 변경을 1회 fetch로 합침 ───
+  // ─── ★ 추이 차트: 필터 변경 시에만 fetch (16ms 배칭 + 동일 쿼리 skip) ───
   useEffect(() => {
     if (!initializedRef.current) return;
-
-    if (trendDebounceRef.current) clearTimeout(trendDebounceRef.current);
-    trendDebounceRef.current = setTimeout(() => {
+    const timer = setTimeout(() => {
       fetchTrend();
-    }, 0);
-
-    return () => {
-      if (trendDebounceRef.current) clearTimeout(trendDebounceRef.current);
-    };
+    }, 16);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trendPreset, trendCustomStart, trendCustomEnd]);
 
-  // ─── ★ 고객 변동: 동일한 debounce 패턴 ───
+  // ─── ★ 고객 변동: 동일한 패턴 ───
   useEffect(() => {
     if (!initializedRef.current) return;
-
-    if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
-    clientDebounceRef.current = setTimeout(() => {
+    const timer = setTimeout(() => {
       fetchClients();
-    }, 0);
-
-    return () => {
-      if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
-    };
+    }, 16);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientPreset, clientCustomStart, clientCustomEnd]);
 
