@@ -217,13 +217,14 @@ export function useDashboard() {
   }, []);
 
   // ─── 고객사 상세 모달 ───
-  const openClientModal = useCallback(async (accountId: number) => {
+  const openClientModal = useCallback(async (accountId: number, type?: string) => {
     setClientModalOpen(true);
     setClientModalLoading(true);
     setClientModalData(null);
     try {
+      const t = type || "churned";
       const data = await apiGet<ClientModalData>(
-        `/api/dashboard/clients/modal?accountId=${accountId}`
+        `/api/dashboard/clients/modal?accountId=${accountId}&type=${t}`
       );
       setClientModalData(data);
     } catch (err) {

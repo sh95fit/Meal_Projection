@@ -26,7 +26,7 @@ interface Props {
   onPresetChange: (p: PeriodPreset) => void;
   onCustomRangeChange: (start: string, end: string) => void;
   onDowScopeChange: (s: ViewScope) => void;
-  onClientClick: (accountId: number) => void;
+  onClientClick: (accountId: number, type?: string) => void;
   loading?: boolean;                                               // ★ 추가
 }
 
