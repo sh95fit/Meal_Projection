@@ -281,6 +281,8 @@ export interface ClientChange {
   currentAvg: number;
   lastOrderDate: string | null;
   mainProduct: string;
+  /** 상품별 일평균 수량 */
+  productAvgs: { productName: string; avg: number }[];
 }
 
 /**

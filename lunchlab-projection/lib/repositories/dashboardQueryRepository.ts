@@ -1173,9 +1173,15 @@ export async function getClientChangeData(
     ...convertedRows.map((r) => Number(r.id)),
   ];
 
-  const orderStatsMap = new Map<number, {
-    avgQty: number; mainProduct: string; lastOrderDate: string;
-  }>();
+  const orderStatsMap = new Map<
+    number,
+    {
+      avgQty: number;
+      mainProduct: string;
+      lastOrderDate: string;
+      productAvgs: { productName: string; avg: number }[];
+    }
+  >();
 
   if (allAccountIds.length > 0) {
     const placeholders = allAccountIds.map(() => "?").join(",");
@@ -1183,18 +1189,20 @@ export async function getClientChangeData(
     // 평균 수량 & 마지막 주문일
     const statsRows = await queryMySQL(
       `SELECT daily.account_id,
-          ROUND(AVG(daily.day_total), 1) AS avg_qty,
-          MAX(daily.delivery_date) AS last_order_date
-      FROM (
-        SELECT o.account_id, o.delivery_date,
+        ROUND(AVG(daily.day_total), 1) AS avg_qty,
+        MAX(daily.delivery_date) AS last_order_date
+        FROM (
+          SELECT o.account_id, o.delivery_date,
                 SUM(od.quantity) AS day_total
-        FROM orders o
-        JOIN \`order-details\` od ON od.order_id = o.id
-        WHERE o.account_id IN (${placeholders})
-          AND o.deleted_at IS NULL AND od.deleted_at IS NULL
-        GROUP BY o.account_id, o.delivery_date
-      ) AS daily
-      GROUP BY daily.account_id`,
+          FROM orders o
+          JOIN \`order-details\` od ON od.order_id = o.id
+          WHERE o.account_id IN (${placeholders})
+            AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+            AND o.delivery_date >= '${DATA_START_DATE}'
+            AND od.product_id <> 21
+          GROUP BY o.account_id, o.delivery_date
+        ) AS daily
+        GROUP BY daily.account_id`,
       allAccountIds
     ) as Record<string, unknown>[];
 
@@ -1202,32 +1210,50 @@ export async function getClientChangeData(
       orderStatsMap.set(Number(row.account_id), {
         avgQty: Number(row.avg_qty) || 0,
         mainProduct: "",
-        lastOrderDate: row.last_order_date ? String(row.last_order_date).slice(0, 10) : "",
+        lastOrderDate: row.last_order_date
+          ? String(row.last_order_date).slice(0, 10)
+          : "",
+        productAvgs: [],
       });
     }
 
-    // 주력 상품 (가장 많이 주문한 product_name)
-    // order-details를 통해 조회
-    const productRows = await queryMySQL(
-      `SELECT o.account_id, od.product_name, SUM(od.quantity) AS total_qty
-       FROM orders o
-       JOIN \`order-details\` od ON od.order_id = o.id
-       WHERE o.account_id IN (${placeholders})
-         AND o.deleted_at IS NULL
-         AND od.deleted_at IS NULL
-       GROUP BY o.account_id, od.product_name
-       ORDER BY o.account_id, total_qty DESC`,
+    // 상품별 일평균 수량 계산
+    const productAvgRows = await queryMySQL(
+      `SELECT daily.account_id, daily.product_name,
+        ROUND(AVG(daily.day_total), 1) AS avg_qty
+        FROM (
+          SELECT o.account_id, od.product_name, o.delivery_date,
+                SUM(od.quantity) AS day_total
+          FROM orders o
+          JOIN \`order-details\` od ON od.order_id = o.id
+          WHERE o.account_id IN (${placeholders})
+            AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+            AND o.delivery_date >= '${DATA_START_DATE}'
+            AND od.product_id <> 21
+          GROUP BY o.account_id, od.product_name, o.delivery_date
+        ) AS daily
+        GROUP BY daily.account_id, daily.product_name
+        ORDER BY daily.account_id, avg_qty DESC`,
       allAccountIds
     ) as Record<string, unknown>[];
 
-    const productProcessed = new Set<number>();
-    for (const row of productRows) {
+    // 고객사별 상품 평균 배열 구성 + 주력 상품(1위) 설정
+    const tempMap = new Map<number, { productName: string; avg: number }[]>();
+    for (const row of productAvgRows) {
       const aid = Number(row.account_id);
-      if (!productProcessed.has(aid)) {
-        productProcessed.add(aid);
-        const existing = orderStatsMap.get(aid);
-        if (existing) {
-          existing.mainProduct = String(row.product_name || "");
+      if (!tempMap.has(aid)) tempMap.set(aid, []);
+      tempMap.get(aid)!.push({
+        productName: String(row.product_name || ""),
+        avg: Number(row.avg_qty) || 0,
+      });
+    }
+
+    for (const [aid, products] of tempMap) {
+      const existing = orderStatsMap.get(aid);
+      if (existing) {
+        existing.productAvgs = products;
+        if (products.length > 0) {
+          existing.mainProduct = products[0].productName;
         }
       }
     }
@@ -1250,6 +1276,7 @@ export async function getClientChangeData(
       currentAvg: 0,
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
+      productAvgs: stats?.productAvgs ?? [],
     });
   }
 
@@ -1264,6 +1291,7 @@ export async function getClientChangeData(
       currentAvg: stats?.avgQty ?? 0,
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
+      productAvgs: stats?.productAvgs ?? [],
     });
   }
 
@@ -1278,6 +1306,7 @@ export async function getClientChangeData(
       currentAvg: stats?.avgQty ?? 0,
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
+      productAvgs: stats?.productAvgs ?? [],
     });
   }
 

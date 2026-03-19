@@ -8,6 +8,15 @@ interface Props {
   data: ClientChangeResponse;
 }
 
+function median(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0
+    ? sorted[mid]
+    : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+}
+
 export function GroupSummaryCards({ data }: Props) {
   const groups = [
     {
@@ -36,37 +45,44 @@ export function GroupSummaryCards({ data }: Props) {
         const items = data.changes.filter((c) => c.type === g.type);
         const count = items.length;
 
-        // 평균 계산
-        const avgQty =
+        // ── 총 평균 식수 합계 (각 고객사의 avgField 합산) ──
+        const totalAvgSum =
           count > 0
-            ? Math.round(
-                (items.reduce((s, c) => s + c[g.avgField], 0) / count) * 10
-              ) / 10
+            ? Math.round(items.reduce((s, c) => s + c[g.avgField], 0) * 10) / 10
             : 0;
 
-        // 중간값 계산
-        const sorted = items
-          .map((c) => c[g.avgField])
-          .sort((a, b) => a - b);
-        const medianQty =
-          count > 0
-            ? count % 2 === 0
-              ? Math.round(
-                  ((sorted[count / 2 - 1] + sorted[count / 2]) / 2) * 10
-                ) / 10
-              : sorted[Math.floor(count / 2)]
-            : 0;
+        // ── 총 중간 식수 합계 (각 고객사 avgField의 중간값 × 고객사 수) ──
+        const medianValue = median(items.map((c) => c[g.avgField]));
+        const totalMedianSum =
+          count > 0 ? Math.round(medianValue * count * 10) / 10 : 0;
 
-        // 주력 상품 집계
-        const productMap = new Map<string, number>();
+        // ── 상품별 집계 ──
+        const productTotals = new Map<
+          string,
+          { avgs: number[]; totalAvg: number }
+        >();
+
         for (const c of items) {
-          if (c.mainProduct) {
-            productMap.set(
-              c.mainProduct,
-              (productMap.get(c.mainProduct) || 0) + 1
-            );
+          const productAvgs = c.productAvgs ?? [];
+          for (const pa of productAvgs) {
+            if (!productTotals.has(pa.productName)) {
+              productTotals.set(pa.productName, { avgs: [], totalAvg: 0 });
+            }
+            const entry = productTotals.get(pa.productName)!;
+            entry.avgs.push(pa.avg);
+            entry.totalAvg += pa.avg;
           }
         }
+
+        // 상품별 평균 합계 / 중간 합계
+        const productStats = Array.from(productTotals.entries())
+          .map(([name, data]) => ({
+            productName: name,
+            avgSum: Math.round(data.totalAvg * 10) / 10,
+            medianSum:
+              Math.round(median(data.avgs) * data.avgs.length * 10) / 10,
+          }))
+          .sort((a, b) => b.avgSum - a.avgSum);
 
         return (
           <Card key={g.type}>
@@ -77,17 +93,29 @@ export function GroupSummaryCards({ data }: Props) {
                 {g.label}
               </p>
               <div className="space-y-1.5 text-sm">
-                <Row label="전체 평균" value={String(avgQty)} />
-                <Row label="전체 중간값" value={String(medianQty)} />
-                {/* 상품별 요약은 mainProduct 기반으로 간략 표시 */}
-                {Array.from(productMap.entries())
-                  .sort((a, b) => b[1] - a[1])
-                  .slice(0, 4)
-                  .map(([name, cnt]) => (
+                {/* 평균 식수 합계 */}
+                <Row label="평균 식수 합계" value={String(totalAvgSum)} />
+                {totalAvgSum > 0 &&
+                  productStats.map((ps) => (
                     <Row
-                      key={name}
-                      label={name}
-                      value={`${cnt}개사 주력`}
+                      key={`avg-${ps.productName}`}
+                      label={ps.productName}
+                      value={String(ps.avgSum)}
+                      sub
+                    />
+                  ))}
+
+                {/* 구분선 */}
+                <div className="border-t border-gray-100 my-1" />
+
+                {/* 중간 식수 합계 */}
+                <Row label="중간 식수 합계" value={String(totalMedianSum)} />
+                {totalMedianSum > 0 &&
+                  productStats.map((ps) => (
+                    <Row
+                      key={`med-${ps.productName}`}
+                      label={ps.productName}
+                      value={String(ps.medianSum)}
                       sub
                     />
                   ))}
