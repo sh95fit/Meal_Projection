@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
       prevEnd = `${prevYear}${end.slice(4)}`;
     } else {
       prevEnd = addDays(start, -1);
-      prevStart = addDays(prevEnd, -(periodDays - 1));
+      prevStart = addDays(prevEnd, -periodDays);
     }
 
     const result = await getClientChangeData(start, end, prevStart, prevEnd);
