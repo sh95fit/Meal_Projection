@@ -311,6 +311,13 @@ export interface ClientChangeResponse {
     new: number;
     converted: number;
     netFlow: number;
+    // 전기 대비 증감 (추가)
+    churnedDelta: number;
+    newDelta: number;
+    convertedDelta: number;
+    prevChurned: number;
+    prevNew: number;
+    prevConverted: number;
   };
   dowFlows: DowFlow[];
 }
