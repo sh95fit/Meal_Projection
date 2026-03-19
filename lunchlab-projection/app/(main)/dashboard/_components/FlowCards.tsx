@@ -51,6 +51,7 @@ export function FlowCards({ summary }: Props) {
       value: churned,
       color: "text-red-600",
       delta: <DeltaText delta={churnedDelta} />,
+      tooltip: "활성 고객사 기준 이탈 수 (체험 고객사 제외)",
     },
     {
       icon: "📈",
@@ -58,6 +59,7 @@ export function FlowCards({ summary }: Props) {
       value: newCount,
       color: "text-green-600",
       delta: <NewDeltaText delta={newDelta} />,
+      tooltip: "구독 전환 고객사 기준 유입 수 (체험 고객사 제외)",
     },
     {
       icon: "🔄",
@@ -65,6 +67,7 @@ export function FlowCards({ summary }: Props) {
       value: converted,
       color: "text-purple-600",
       delta: <NewDeltaText delta={convertedDelta} />,
+      tooltip: "전환 예정 설정이 되어 있는 고객사가 유효한 경우 표시",
     },
     {
       icon: netFlow >= 0 ? "📊" : "⚠️",
@@ -72,13 +75,14 @@ export function FlowCards({ summary }: Props) {
       value: `${netFlow >= 0 ? "+" : ""}${netFlow}`,
       color: netFlow >= 0 ? "text-green-600" : "text-red-600",
       delta: null,
+      tooltip: null,
     },
   ];
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {cards.map((c, i) => (
-        <Card key={i}>
+        <Card key={i} className="relative group">
           <CardContent className="pt-5 pb-4 text-center">
             <span className="text-2xl block mb-1">{c.icon}</span>
             <span className={`text-3xl font-extrabold block ${c.color}`}>
@@ -91,18 +95,11 @@ export function FlowCards({ summary }: Props) {
               <span className="block mt-1">{c.delta}</span>
             )}
 
-            {/* 순유입 카드에만 게이지 바 */}
-            {i === 3 && (
-              <div className="h-1 rounded-full mt-2 w-3/5 mx-auto overflow-hidden bg-gray-200">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    netFlow >= 0 ? "bg-green-500" : "bg-red-500"
-                  }`}
-                  style={{
-                    width: `${Math.min(Math.abs(netFlow) * 10, 100)}%`,
-                  }}
-                />
-              </div>
+            {/* 호버 툴팁 */}
+            {c.tooltip && (
+              <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-1 hidden group-hover:block whitespace-nowrap rounded bg-gray-800 px-2.5 py-1.5 text-xs text-white shadow-lg z-10">
+                {c.tooltip}
+              </span>
             )}
           </CardContent>
         </Card>
