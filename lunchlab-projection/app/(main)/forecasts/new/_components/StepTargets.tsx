@@ -1,3 +1,4 @@
+// app/(main)/forecasts/new/_components/StepTargets.tsx
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,14 +41,14 @@ export function StepTargets({ targets, products, onAddTarget, onUpdateTarget, on
                 <SelectContent>
                   {products.map((p) => (
                     <SelectItem key={p.id} value={String(p.id)}>
-                      {p.product_name} (D+{p.offset_days})
+                      {p.product_name} (D+{p.offset_days}{p.saturday_available ? ", 토 포함" : ""})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1">
-              <Label>출고일</Label>
+              <Label>출고일 (영업일 기준)</Label>
               <div className="flex items-center gap-2">
                 <Input
                   type="date"
@@ -58,6 +59,11 @@ export function StepTargets({ targets, products, onAddTarget, onUpdateTarget, on
                 <span className="text-sm font-semibold text-primary whitespace-nowrap min-w-[100px]">
                   {formatDateWithDay(target.deliveryDate)}
                 </span>
+                {target.product.saturday_available && (
+                  <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                    토 판매
+                  </span>
+                )}
               </div>
             </div>
             <Button variant="ghost" size="sm" onClick={() => onRemoveTarget(idx)}>

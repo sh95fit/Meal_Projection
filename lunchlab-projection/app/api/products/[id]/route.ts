@@ -1,5 +1,5 @@
-// ──────────────────────────────────────────────────────────────────
 // app/api/products/[id]/route.ts
+// ──────────────────────────────────────────────────────────────────
 // 상품 개별 조회 / 수정 / 삭제
 // ──────────────────────────────────────────────────────────────────
 import { NextRequest, NextResponse } from "next/server";
@@ -40,6 +40,7 @@ export async function PATCH(
     const product = await updateProduct(Number(id), {
       product_name: body.product_name,
       offset_days: body.offset_days,
+      saturday_available: body.saturday_available,  // ★ 추가
       notification_group: body.notification_group,
       color: body.color,
     });

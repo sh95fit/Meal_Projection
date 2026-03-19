@@ -1,5 +1,5 @@
-// ──────────────────────────────────────────────────────────────────
 // app/api/products/route.ts
+// ──────────────────────────────────────────────────────────────────
 // 상품 목록 조회 / 신규 등록
 // ──────────────────────────────────────────────────────────────────
 import { NextRequest, NextResponse } from "next/server";
@@ -21,7 +21,7 @@ export async function GET() {
   }
 }
 
-/** POST /api/products — 동일 */
+/** POST /api/products */
 export async function POST(request: NextRequest) {
   try {
     await requireAuth();
@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
     const product = await createProduct({
       product_name: body.product_name,
       offset_days: body.offset_days,
+      saturday_available: body.saturday_available,  // ★ 추가
       notification_group: body.notification_group,
       color: body.color,
     });

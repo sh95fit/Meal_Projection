@@ -1,3 +1,4 @@
+// app/(main)/products/page.tsx
 "use client";
 
 import { Button } from "@/components/ui/button";
@@ -35,14 +36,23 @@ export default function ProductsPage() {
       </Card>
 
       <ProductDialog
-        open={h.dialogOpen} onOpenChange={h.setDialogOpen}
+        open={h.dialogOpen}
+        onOpenChange={h.setDialogOpen}
         editingProduct={h.editingProduct}
-        productName={h.productName} onProductNameChange={h.setProductName}
-        offsetDays={h.offsetDays} onOffsetDaysChange={h.setOffsetDays}
-        notificationGroup={h.notificationGroup} onNotificationGroupChange={h.setNotificationGroup}
-        color={h.color} onColorChange={h.setColor}
+        productName={h.productName}
+        onProductNameChange={h.setProductName}
+        offsetDays={h.offsetDays}
+        onOffsetDaysChange={h.setOffsetDays}
+        saturdayAvailable={h.saturdayAvailable}
+        onSaturdayAvailableChange={h.setSaturdayAvailable}
+        notificationGroup={h.notificationGroup}
+        onNotificationGroupChange={h.setNotificationGroup}
+        color={h.color}
+        onColorChange={h.setColor}
         mappings={h.mappings}
-        onAddMapping={h.addMapping} onRemoveMapping={h.removeMapping} onUpdateMapping={h.updateMapping}
+        onAddMapping={h.addMapping}
+        onRemoveMapping={h.removeMapping}
+        onUpdateMapping={h.updateMapping}
         onSubmit={h.handleSubmit}
       />
     </div>

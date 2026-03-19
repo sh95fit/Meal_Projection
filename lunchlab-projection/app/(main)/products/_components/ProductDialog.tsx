@@ -1,6 +1,10 @@
+// app/(main)/products/_components/ProductDialog.tsx
+// 변경 부분만 표시 (Props 인터페이스 + 다이얼로그 본문)
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, X } from "lucide-react";
@@ -16,6 +20,8 @@ interface Props {
   onProductNameChange: (v: string) => void;
   offsetDays: number;
   onOffsetDaysChange: (v: number) => void;
+  saturdayAvailable: boolean;
+  onSaturdayAvailableChange: (v: boolean) => void;
   notificationGroup: string;
   onNotificationGroupChange: (v: string) => void;
   color: string;
@@ -30,6 +36,7 @@ interface Props {
 export function ProductDialog({
   open, onOpenChange, editingProduct,
   productName, onProductNameChange, offsetDays, onOffsetDaysChange,
+  saturdayAvailable, onSaturdayAvailableChange,
   notificationGroup, onNotificationGroupChange,
   color, onColorChange,
   mappings, onAddMapping, onRemoveMapping, onUpdateMapping, onSubmit,
@@ -52,8 +59,23 @@ export function ProductDialog({
           <div className="space-y-2">
             <Label>산출기준일 (D+N)</Label>
             <Input type="number" value={offsetDays} onChange={(e) => onOffsetDaysChange(parseInt(e.target.value) || 0)} min={1} />
-            <p className="text-xs text-muted-foreground">산출일 기준 N일 후가 출고일이 됩니다</p>
+            <p className="text-xs text-muted-foreground">산출일 기준 N번째 영업일이 출고일이 됩니다</p>
           </div>
+
+          {/* ── 토요일 판매 여부 ── */}
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>토요일 판매</Label>
+              <p className="text-xs text-muted-foreground">
+                활성화 시 토요일도 영업일로 포함하여 출고일을 계산합니다
+              </p>
+            </div>
+            <Switch
+              checked={saturdayAvailable}
+              onCheckedChange={onSaturdayAvailableChange}
+            />
+          </div>
+
           <div className="space-y-2">
             <Label>알림 그룹 (선택)</Label>
             <Input value={notificationGroup} onChange={(e) => onNotificationGroupChange(e.target.value)} placeholder="예: 가정식" />
