@@ -1,7 +1,8 @@
 // app/(main)/dashboard/_components/QuantityTable.tsx (전체 교체)
 "use client";
 
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "./shared/StatusBadge";
+import { calcDaysBetween } from "@/lib/utils/format";
 import type { QuantityClient, ProductChip, ViewScope } from "@/types/dashboard";
 
 interface Props {
@@ -12,73 +13,20 @@ interface Props {
   onClientClick?: (accountId: number) => void;
 }
 
-function calcRetentionDays(subscriptionAt: string | null, targetDate: string): number | null {
-  if (!subscriptionAt) return null;
-  const sub = subscriptionAt.slice(0, 10);
-  const [sy, sm, sd] = sub.split("-").map(Number);
-  const [ty, tm, td] = targetDate.split("-").map(Number);
-  if (!sy || !sm || !sd || !ty || !tm || !td) return null;
-  const subDate = new Date(sy, sm - 1, sd);
-  const tgtDate = new Date(ty, tm - 1, td);
-  const diffMs = tgtDate.getTime() - subDate.getTime();
-  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  return days >= 0 ? days : null;
-}
-
-// ★ 이용상태 배지
-function StatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case "available":
-      return (
-        <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-[10px]">
-          이용중
-        </Badge>
-      );
-    case "disabled":
-      return (
-        <Badge variant="outline" className="text-red-600 border-red-300 bg-red-50 text-[10px]">
-          이용종료
-        </Badge>
-      );
-    case "considering":
-      return (
-        <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 text-[10px]">
-          체험
-        </Badge>
-      );
-    case "pending":
-      return (
-        <Badge variant="outline" className="text-purple-600 border-purple-300 bg-purple-50 text-[10px]">
-          대기
-        </Badge>
-      );
-    case "suspended":
-      return (
-        <Badge variant="outline" className="text-orange-600 border-orange-300 bg-grange-50 text-[10px]">
-          보류
-        </Badge>
-      );
-    case "scheduled":
-      return (
-        <Badge variant="outline" className="text-gray-600 border-gray-300 bg-gray-50 text-[10px]">
-          전환예정
-        </Badge>
-      );
-    default:
-      return (
-        <Badge variant="outline" className="text-gray-500 border-gray-300 bg-gray-50 text-[10px]">
-          {status || "-"}
-        </Badge>
-      );
-  }
-}
-
-const thClass = "py-2 px-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap";
-const thRight = "py-2 px-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap";
+const thClass =
+  "py-2 px-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap";
+const thRight =
+  "py-2 px-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap";
 const tdClass = "py-2.5 px-3";
 const tdRight = "py-2.5 px-3 text-right";
 
-export function QuantityTable({ clients, scope, productChips, targetDate, onClientClick }: Props) {
+export function QuantityTable({
+  clients,
+  scope,
+  productChips,
+  targetDate,
+  onClientClick,
+}: Props) {
   if (clients.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-4 text-center">
@@ -106,12 +54,21 @@ export function QuantityTable({ clients, scope, productChips, targetDate, onClie
         <tbody>
           {clients.map((c) => {
             const cls =
-              c.totalDiff > 0 ? "text-green-600" : c.totalDiff < 0 ? "text-red-600" : "";
+              c.totalDiff > 0
+                ? "text-green-600"
+                : c.totalDiff < 0
+                  ? "text-red-600"
+                  : "";
             const arrow =
               c.totalDiff > 0 ? "▲" : c.totalDiff < 0 ? "▼" : "";
             const rate =
-              c.totalLast > 0 ? Math.round((c.totalDiff / c.totalLast) * 100) : "—";
-            const retentionDays = calcRetentionDays(c.subscriptionAt, targetDate);
+              c.totalLast > 0
+                ? Math.round((c.totalDiff / c.totalLast) * 100)
+                : "—";
+            const retentionDays = calcDaysBetween(
+              c.subscriptionAt,
+              targetDate
+            );
 
             return (
               <tr
@@ -119,14 +76,22 @@ export function QuantityTable({ clients, scope, productChips, targetDate, onClie
                 className={`border-b last:border-0 ${onClientClick ? "cursor-pointer" : ""} hover:bg-gray-50`}
                 onClick={() => onClientClick?.(c.accountId)}
               >
-                <td className={`${tdClass} font-semibold`}>{c.accountName}</td>
-                <td className={tdClass}><StatusBadge status={c.accountStatus} /></td>
-                <td className={`${tdClass} text-xs text-gray-500 whitespace-nowrap`}>
+                <td className={`${tdClass} font-semibold`}>
+                  {c.accountName}
+                </td>
+                <td className={tdClass}>
+                  <StatusBadge status={c.accountStatus} />
+                </td>
+                <td
+                  className={`${tdClass} text-xs text-gray-500 whitespace-nowrap`}
+                >
                   {c.subscriptionAt ? (
                     <>
                       {c.subscriptionAt.slice(0, 10)}
                       {retentionDays !== null && (
-                        <span className="text-gray-400 ml-1">({retentionDays}일)</span>
+                        <span className="text-gray-400 ml-1">
+                          ({retentionDays}일)
+                        </span>
                       )}
                     </>
                   ) : (
@@ -145,11 +110,17 @@ export function QuantityTable({ clients, scope, productChips, targetDate, onClie
                 <td className={`${tdClass} pl-6`}>
                   <div className="flex flex-wrap gap-1.5">
                     {c.products.map((p) => {
-                      const chip = productChips.find((ch) => ch.productName === p.productName);
+                      const chip = productChips.find(
+                        (ch) => ch.productName === p.productName
+                      );
                       const color = chip?.color ?? "#6b7280";
                       const diff = p.diff;
                       const diffColor =
-                        diff > 0 ? "text-blue-600" : diff < 0 ? "text-red-600" : "text-gray-400";
+                        diff > 0
+                          ? "text-blue-600"
+                          : diff < 0
+                            ? "text-red-600"
+                            : "text-gray-400";
                       const diffPrefix = diff > 0 ? "+" : "";
 
                       return (
@@ -162,11 +133,16 @@ export function QuantityTable({ clients, scope, productChips, targetDate, onClie
                             style={{ backgroundColor: color }}
                           />
                           {p.productName}
-                          <span className="text-gray-500">{p.lastWeekQty}</span>
+                          <span className="text-gray-500">
+                            {p.lastWeekQty}
+                          </span>
                           <span className="text-gray-400">→</span>
-                          <span className="text-gray-700 font-medium">{p.thisWeekQty}</span>
+                          <span className="text-gray-700 font-medium">
+                            {p.thisWeekQty}
+                          </span>
                           <span className={`font-medium ${diffColor}`}>
-                            ({diffPrefix}{diff})
+                            ({diffPrefix}
+                            {diff})
                           </span>
                         </span>
                       );

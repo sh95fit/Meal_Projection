@@ -1,20 +1,12 @@
-// app/(main)/dashboard/_components/GroupSummaryCards.tsx
+// app/(main)/dashboard/_components/GroupSummaryCards.tsx (전체 교체)
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { median } from "@/lib/utils/format";
 import type { ClientChangeResponse } from "@/types/dashboard";
 
 interface Props {
   data: ClientChangeResponse;
-}
-
-function median(arr: number[]): number {
-  if (arr.length === 0) return 0;
-  const sorted = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0
-    ? sorted[mid]
-    : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
 }
 
 export function GroupSummaryCards({ data }: Props) {
@@ -45,13 +37,15 @@ export function GroupSummaryCards({ data }: Props) {
         const items = data.changes.filter((c) => c.type === g.type);
         const count = items.length;
 
-        // ── 총 평균 식수 합계 (각 고객사의 avgField 합산) ──
+        // ── 총 평균 식수 합계 ──
         const totalAvgSum =
           count > 0
-            ? Math.round(items.reduce((s, c) => s + c[g.avgField], 0) * 10) / 10
+            ? Math.round(
+                items.reduce((s, c) => s + c[g.avgField], 0) * 10
+              ) / 10
             : 0;
 
-        // ── 총 중간 식수 합계 (각 고객사 avgField의 중간값 × 고객사 수) ──
+        // ── 총 중간 식수 합계 ──
         const medianValue = median(items.map((c) => c[g.avgField]));
         const totalMedianSum =
           count > 0 ? Math.round(medianValue * count * 10) / 10 : 0;
@@ -74,13 +68,12 @@ export function GroupSummaryCards({ data }: Props) {
           }
         }
 
-        // 상품별 평균 합계 / 중간 합계
         const productStats = Array.from(productTotals.entries())
-          .map(([name, data]) => ({
+          .map(([name, d]) => ({
             productName: name,
-            avgSum: Math.round(data.totalAvg * 10) / 10,
+            avgSum: Math.round(d.totalAvg * 10) / 10,
             medianSum:
-              Math.round(median(data.avgs) * data.avgs.length * 10) / 10,
+              Math.round(median(d.avgs) * d.avgs.length * 10) / 10,
           }))
           .sort((a, b) => b.avgSum - a.avgSum);
 
