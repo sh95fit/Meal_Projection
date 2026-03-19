@@ -2,8 +2,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/services/authService";
 import { getOrdersByDate } from "@/lib/repositories/dashboardQueryRepository";
+import { getProductColorMap } from "@/lib/repositories/productRepository";
+import { PRESET_COLORS } from "@/lib/utils/color";
 import { getToday, addDays } from "@/lib/utils/date";
+import { queryMySQL } from "@/lib/mysql/client";
 import { createClient } from "@/lib/supabase/server";
+
+function toDateStr(val: unknown): string | null {
+  if (!val) return null;
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, "0");
+    const d = String(val.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(val);
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, "0");
+    const d = String(parsed.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return null;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,6 +41,52 @@ export async function GET(request: NextRequest) {
       );
     }
     const accountId = Number(accountIdStr);
+    const clientType = searchParams.get("type") || "churned";
+
+    // ── 계정 정보 조회 (날짜 필드) ──
+    const accountRows = (await queryMySQL(
+      `SELECT name, subscription_at, terminate_at, subscription_scheduled_at
+       FROM accounts WHERE id = ?`,
+      [accountId]
+    )) as Record<string, unknown>[];
+
+    const acct = accountRows[0] || {};
+    const subscriptionAt = toDateStr(acct.subscription_at);
+    const terminateAt = toDateStr(acct.terminate_at);
+    const subscriptionScheduledAt = toDateStr(acct.subscription_scheduled_at);
+    const dbAccountName = acct.name ? String(acct.name) : null;
+
+    // ── 첫 주문일 조회 ──
+    const firstOrderRows = (await queryMySQL(
+      `SELECT MIN(o.delivery_date) AS first_date
+       FROM orders o
+       WHERE o.account_id = ? AND o.deleted_at IS NULL`,
+      [accountId]
+    )) as Record<string, unknown>[];
+    const firstOrderDate = toDateStr(firstOrderRows[0]?.first_date);
+
+    // ── 마지막 주문일 조회 ──
+    const lastOrderRows = (await queryMySQL(
+      `SELECT MAX(o.delivery_date) AS last_date
+       FROM orders o
+       WHERE o.account_id = ? AND o.deleted_at IS NULL`,
+      [accountId]
+    )) as Record<string, unknown>[];
+    const lastOrderDate = toDateStr(lastOrderRows[0]?.last_date);
+
+    // ── 총 서비스 이용일 계산 ──
+    let serviceDays: number | null = null;
+    if (clientType === "churned" && subscriptionAt && terminateAt) {
+      serviceDays = Math.round(
+        (new Date(terminateAt).getTime() - new Date(subscriptionAt).getTime()) /
+          (1000 * 60 * 60 * 24)
+      );
+    } else if (clientType === "new" && subscriptionAt) {
+      serviceDays = Math.round(
+        (new Date(getToday()).getTime() - new Date(subscriptionAt).getTime()) /
+          (1000 * 60 * 60 * 24)
+      );
+    }
 
     // ── 최근 영업일 목록 생성 (45일 전부터 → 30영업일 추출) ──
     const today = getToday();
@@ -68,7 +137,8 @@ export async function GET(request: NextRequest) {
 
     const medianQty = median(qtyList);
 
-    // ── 상품별 평균 / 중간값 ──
+    // ── 상품 목록 + 색상 ──
+    const colorMap = await getProductColorMap();
     const supabase = await createClient();
     const { data: products } = await supabase
       .from("products")
@@ -76,6 +146,15 @@ export async function GET(request: NextRequest) {
       .is("deleted_at", null)
       .order("created_at", { ascending: true });
 
+    const productList = (products || []).map((p, idx) => {
+      const name = String(p.product_name);
+      return {
+        productName: name,
+        color: colorMap.get(name) || PRESET_COLORS[idx % PRESET_COLORS.length],
+      };
+    });
+
+    // ── 상품별 평균 / 중간값 ──
     const productStats = (products || []).map((p) => {
       const pName = String(p.product_name);
       const pQtyList: number[] = [];
@@ -95,23 +174,43 @@ export async function GET(request: NextRequest) {
       return { productName: pName, avg, median: median(pQtyList) };
     });
 
-    // ── 추이 데이터 ──
+    // ── 추이 데이터 (상품별 수량 포함) ──
     const recentTrend = recentDates.map((d) => {
       const found = dailyResults.find((r) => r.date === d);
-      return { date: d, qty: found?.qty || 0 };
+      const row: Record<string, string | number> = {
+        date: d,
+        qty: found?.qty || 0,
+      };
+      for (const pl of productList) {
+        const pqty = (found?.orders || [])
+          .filter((o) => o.productName === pl.productName)
+          .reduce((s, o) => s + o.quantity, 0);
+        row[pl.productName] = pqty;
+      }
+      return row;
     });
 
     // ── 고객사명 ──
     const accountName =
-      orderedDays[0]?.orders[0]?.accountName || `고객사 #${accountId}`;
+      dbAccountName ||
+      orderedDays[0]?.orders[0]?.accountName ||
+      `고객사 #${accountId}`;
 
     return NextResponse.json({
       accountId,
       accountName,
+      clientType,
+      terminateAt,
+      subscriptionAt,
+      subscriptionScheduledAt,
+      firstOrderDate,
+      lastOrderDate,
+      serviceDays,
       totalOrders,
       avgQty,
       medianQty,
       productStats,
+      productList,
       recentTrend,
     });
   } catch (err: unknown) {

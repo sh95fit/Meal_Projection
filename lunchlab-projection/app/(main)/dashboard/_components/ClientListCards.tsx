@@ -8,7 +8,7 @@ import type { ClientChangeResponse, ClientChange } from "@/types/dashboard";
 
 interface Props {
   data: ClientChangeResponse;
-  onClientClick: (accountId: number) => void;
+  onClientClick: (accountId: number, type?: string) => void; 
 }
 
 const GROUPS = [
@@ -124,7 +124,7 @@ export function ClientListCards({ data, onClientClick }: Props) {
                               className="font-semibold text-sm truncate hover:underline"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onClientClick(c.accountId);
+                                onClientClick(c.accountId, c.type);
                               }}
                             >
                               {c.accountName}

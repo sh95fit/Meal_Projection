@@ -455,6 +455,20 @@ export interface ClientChangeDetailResponse extends ClientChangeResponse {
 export interface ClientModalData {
   accountId: number;
   accountName: string;
+  /** 고객 유형 (churned | new | converted) */
+  clientType: "churned" | "new" | "converted";
+  /** 이용 종료일 — 이탈 고객만 */
+  terminateAt: string | null;
+  /** 구독 전환일 — 이탈/신규 고객 */
+  subscriptionAt: string | null;
+  /** 전환 예정일 — 전환예정 고객만 */
+  subscriptionScheduledAt: string | null;
+  /** 첫 주문일 */
+  firstOrderDate: string | null;
+  /** 마지막 주문일 */
+  lastOrderDate: string | null;
+  /** 총 서비스 이용일 수 */
+  serviceDays: number | null;
   totalOrders: number;
   avgQty: number;
   medianQty: number;
@@ -463,8 +477,15 @@ export interface ClientModalData {
     avg: number;
     median: number;
   }[];
+  /** 상품 목록 (색상 포함) — 차트 범례용 */
+  productList: {
+    productName: string;
+    color: string;
+  }[];
+  /** 최근 30일 추이 — 상품별 수량 포함 */
   recentTrend: {
     date: string;
     qty: number;
+    [productName: string]: string | number;
   }[];
 }
