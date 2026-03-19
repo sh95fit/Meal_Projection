@@ -160,7 +160,7 @@ export function useDashboard() {
           start = addDays(today, -89);
           break;
       }
-      url = `/api/dashboard/clients?start=${start}&end=${today}`;
+      url = `/api/dashboard/clients?start=${start}&end=${today}&preset=${preset}`;
     }
 
     // ★ 동일 쿼리면 skip (force=true일 때는 무시)

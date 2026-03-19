@@ -1076,160 +1076,269 @@ function groupByCompany(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 메인 쿼리 #4: getClientChangeData
+// 메인 쿼리 #4: getClientChangeData (전체 교체)
 // ══════════════════════════════════════════════════════════════════
 
 /**
- * 고객 변동 현황 데이터를 조회합니다.
+ * 고객 변동 현황을 조회합니다.
  *
- * @param startDate  현재 기간 시작일 "YYYY-MM-DD"
- * @param endDate    현재 기간 종료일 "YYYY-MM-DD"
+ * 분류 기준 (accounts 테이블 기반):
+ *   - 이탈(churned): status='disabled' AND terminate_at이 현재 기간 내
+ *   - 신규(new): status='available' AND subscription_at이 현재 기간 내
+ *   - 전환예정(converted): status='scheduled' AND subscription_scheduled_at이 현재 기간 내
+ *
+ * 전기 대비 증감: prevStart~prevEnd 기간의 동일 조건 카운트와 비교
+ *
+ * @param startDate    현재 기간 시작일
+ * @param endDate      현재 기간 종료일
+ * @param prevStartDate 이전 기간 시작일
+ * @param prevEndDate   이전 기간 종료일
  */
 export async function getClientChangeData(
   startDate: string,
-  endDate: string
+  endDate: string,
+  prevStartDate: string,
+  prevEndDate: string,
 ): Promise<ClientChangeResponse> {
-  const [sy, sm, sd] = startDate.split("-").map(Number);
-  const [ey, em, ed] = endDate.split("-").map(Number);
-  const startObj = new Date(sy, sm - 1, sd);
-  const endObj = new Date(ey, em - 1, ed);
-  const periodDays =
-    Math.round((endObj.getTime() - startObj.getTime()) / 86400000) + 1;
 
-  const prevEndDate = addDays(startDate, -1);
-  const prevStartDate = addDays(startDate, -periodDays);
+  // ═══════════════════════════════════════
+  // 1) 현재 기간 이탈/신규/전환예정 조회
+  // ═══════════════════════════════════════
 
-  // 현재 기간 일별 주문
-  const currentDates: string[] = [];
-  let cur = startDate;
-  while (cur <= endDate) {
-    currentDates.push(cur);
-    cur = addDays(cur, 1);
+  const churnedRows = await queryMySQL(
+    `SELECT a.id, a.name, a.status, a.terminate_at,
+            a.subscription_at, a.order_day
+     FROM accounts a
+     WHERE a.status = 'disabled'
+       AND a.terminate_at >= ?
+       AND a.terminate_at <= ?`,
+    [startDate, endDate]
+  ) as Record<string, unknown>[];
+
+  const newRows = await queryMySQL(
+    `SELECT a.id, a.name, a.status, a.subscription_at, a.order_day
+     FROM accounts a
+     WHERE a.status = 'available'
+       AND a.subscription_at >= ?
+       AND a.subscription_at <= ?`,
+    [startDate, endDate]
+  ) as Record<string, unknown>[];
+
+  const convertedRows = await queryMySQL(
+    `SELECT a.id, a.name, a.status,
+            a.subscription_scheduled_at, a.order_day
+     FROM accounts a
+     WHERE a.status = 'scheduled'
+       AND a.subscription_scheduled_at >= ?
+       AND a.subscription_scheduled_at <= ?`,
+    [startDate, endDate]
+  ) as Record<string, unknown>[];
+
+  // ═══════════════════════════════════════
+  // 2) 이전 기간 카운트 (증감 비교용)
+  // ═══════════════════════════════════════
+
+  const prevChurnedRows = await queryMySQL(
+    `SELECT COUNT(*) AS cnt FROM accounts
+     WHERE status = 'disabled'
+       AND terminate_at >= ? AND terminate_at <= ?`,
+    [prevStartDate, prevEndDate]
+  ) as Record<string, unknown>[];
+
+  const prevNewRows = await queryMySQL(
+    `SELECT COUNT(*) AS cnt FROM accounts
+     WHERE status = 'available'
+       AND subscription_at >= ? AND subscription_at <= ?`,
+    [prevStartDate, prevEndDate]
+  ) as Record<string, unknown>[];
+
+  const prevConvertedRows = await queryMySQL(
+    `SELECT COUNT(*) AS cnt FROM accounts
+     WHERE status = 'scheduled'
+       AND subscription_scheduled_at >= ? AND subscription_scheduled_at <= ?`,
+    [prevStartDate, prevEndDate]
+  ) as Record<string, unknown>[];
+
+  // ═══════════════════════════════════════
+  // 3) 각 고객사의 주문 통계 보강
+  // ═══════════════════════════════════════
+
+  const allAccountIds = [
+    ...churnedRows.map((r) => Number(r.id)),
+    ...newRows.map((r) => Number(r.id)),
+    ...convertedRows.map((r) => Number(r.id)),
+  ];
+
+  const orderStatsMap = new Map<number, {
+    avgQty: number; mainProduct: string; lastOrderDate: string;
+  }>();
+
+  if (allAccountIds.length > 0) {
+    const placeholders = allAccountIds.map(() => "?").join(",");
+
+    // 평균 수량 & 마지막 주문일
+    const statsRows = await queryMySQL(
+      `SELECT daily.account_id,
+          ROUND(AVG(daily.day_total), 1) AS avg_qty,
+          MAX(daily.delivery_date) AS last_order_date
+      FROM (
+        SELECT o.account_id, o.delivery_date,
+                SUM(od.quantity) AS day_total
+        FROM orders o
+        JOIN \`order-details\` od ON od.order_id = o.id
+        WHERE o.account_id IN (${placeholders})
+          AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+        GROUP BY o.account_id, o.delivery_date
+      ) AS daily
+      GROUP BY daily.account_id`,
+      allAccountIds
+    ) as Record<string, unknown>[];
+
+    for (const row of statsRows) {
+      orderStatsMap.set(Number(row.account_id), {
+        avgQty: Number(row.avg_qty) || 0,
+        mainProduct: "",
+        lastOrderDate: row.last_order_date ? String(row.last_order_date).slice(0, 10) : "",
+      });
+    }
+
+    // 주력 상품 (가장 많이 주문한 product_name)
+    // order-details를 통해 조회
+    const productRows = await queryMySQL(
+      `SELECT o.account_id, od.product_name, SUM(od.quantity) AS total_qty
+       FROM orders o
+       JOIN \`order-details\` od ON od.order_id = o.id
+       WHERE o.account_id IN (${placeholders})
+         AND o.deleted_at IS NULL
+         AND od.deleted_at IS NULL
+       GROUP BY o.account_id, od.product_name
+       ORDER BY o.account_id, total_qty DESC`,
+      allAccountIds
+    ) as Record<string, unknown>[];
+
+    const productProcessed = new Set<number>();
+    for (const row of productRows) {
+      const aid = Number(row.account_id);
+      if (!productProcessed.has(aid)) {
+        productProcessed.add(aid);
+        const existing = orderStatsMap.get(aid);
+        if (existing) {
+          existing.mainProduct = String(row.product_name || "");
+        }
+      }
+    }
   }
 
-  const currentOrderResults = await Promise.all(
-    currentDates.map((d) =>
-      getOrdersByDate(d).then((r) => ({ date: d, orders: r.orders }))
-    )
-  );
-
-  // 이전 기간 일별 주문
-  const prevDates: string[] = [];
-  cur = prevStartDate;
-  while (cur <= prevEndDate) {
-    prevDates.push(cur);
-    cur = addDays(cur, 1);
-  }
-
-  const prevOrderResults = await Promise.all(
-    prevDates.map((d) =>
-      getOrdersByDate(d).then((r) => ({ date: d, orders: r.orders }))
-    )
-  );
-
-  const currentSummary = groupByCompany(currentOrderResults);
-  const prevSummary = groupByCompany(prevOrderResults);
+  // ═══════════════════════════════════════
+  // 4) changes 배열 구성
+  // ═══════════════════════════════════════
 
   const changes: ClientChange[] = [];
 
-  // 이탈
-  for (const [acctId, prev] of prevSummary) {
-    if (!currentSummary.has(acctId)) {
-      changes.push({
-        type: "churned",
-        accountId: prev.accountId,
-        accountName: prev.accountName,
-        previousAvg: prev.avgQty,
-        currentAvg: 0,
-        lastOrderDate: prev.lastOrderDate,
-        mainProduct: prev.mainProduct,
-      });
-    }
-  }
-
-  // 신규
-  for (const [acctId, current] of currentSummary) {
-    if (!prevSummary.has(acctId)) {
-      changes.push({
-        type: "new",
-        accountId: current.accountId,
-        accountName: current.accountName,
-        previousAvg: 0,
-        currentAvg: current.avgQty,
-        lastOrderDate: current.lastOrderDate,
-        mainProduct: current.mainProduct,
-      });
-    }
-  }
-
-  // 전환 (±30%)
-  for (const [acctId, current] of currentSummary) {
-    const prev = prevSummary.get(acctId);
-    if (!prev) continue;
-    const changeRate =
-      prev.avgQty > 0
-        ? ((current.avgQty - prev.avgQty) / prev.avgQty) * 100
-        : 0;
-    if (Math.abs(changeRate) >= 30) {
-      changes.push({
-        type: "converted",
-        accountId: current.accountId,
-        accountName: current.accountName,
-        previousAvg: prev.avgQty,
-        currentAvg: current.avgQty,
-        lastOrderDate: current.lastOrderDate,
-        mainProduct: current.mainProduct,
-      });
-    }
-  }
-
-  const summary = {
-    churned: changes.filter((c) => c.type === "churned").length,
-    new: changes.filter((c) => c.type === "new").length,
-    converted: changes.filter((c) => c.type === "converted").length,
-    netFlow:
-      changes.filter((c) => c.type === "new").length -
-      changes.filter((c) => c.type === "churned").length,
-  };
-
-  // 요일별 순유입
-  const dowFlows: DowFlow[] = [];
-  const dowKeys = ["mon", "tue", "wed", "thu", "fri"];
-
-  for (const dowKey of dowKeys) {
-    const currentDow = new Set<number>();
-    for (const { date, orders } of currentOrderResults) {
-      const [yy, mm, dd] = date.split("-").map(Number);
-      if (DAY_NAMES[new Date(yy, mm - 1, dd).getDay()] === dowKey) {
-        for (const o of orders) currentDow.add(o.accountId);
-      }
-    }
-
-    const prevDow = new Set<number>();
-    for (const { date, orders } of prevOrderResults) {
-      const [yy, mm, dd] = date.split("-").map(Number);
-      if (DAY_NAMES[new Date(yy, mm - 1, dd).getDay()] === dowKey) {
-        for (const o of orders) prevDow.add(o.accountId);
-      }
-    }
-
-    let churned = 0;
-    for (const id of prevDow) {
-      if (!currentDow.has(id)) churned++;
-    }
-    let newCount = 0;
-    for (const id of currentDow) {
-      if (!prevDow.has(id)) newCount++;
-    }
-
-    dowFlows.push({
-      dow: dowKey,
-      dowLabel: DOW_MAP[dowKey] || dowKey,
-      churned,
-      newCount,
-      net: newCount - churned,
+  for (const row of churnedRows) {
+    const aid = Number(row.id);
+    const stats = orderStatsMap.get(aid);
+    changes.push({
+      type: "churned",
+      accountId: aid,
+      accountName: String(row.name || ""),
+      previousAvg: stats?.avgQty ?? 0,
+      currentAvg: 0,
+      mainProduct: stats?.mainProduct ?? "",
+      lastOrderDate: stats?.lastOrderDate ?? null,
     });
   }
 
-  return { startDate, endDate, changes, summary, dowFlows };
+  for (const row of newRows) {
+    const aid = Number(row.id);
+    const stats = orderStatsMap.get(aid);
+    changes.push({
+      type: "new",
+      accountId: aid,
+      accountName: String(row.name || ""),
+      previousAvg: 0,
+      currentAvg: stats?.avgQty ?? 0,
+      mainProduct: stats?.mainProduct ?? "",
+      lastOrderDate: stats?.lastOrderDate ?? null,
+    });
+  }
+
+  for (const row of convertedRows) {
+    const aid = Number(row.id);
+    const stats = orderStatsMap.get(aid);
+    changes.push({
+      type: "converted",
+      accountId: aid,
+      accountName: String(row.name || ""),
+      previousAvg: 0,
+      currentAvg: stats?.avgQty ?? 0,
+      mainProduct: stats?.mainProduct ?? "",
+      lastOrderDate: stats?.lastOrderDate ?? null,
+    });
+  }
+
+  // ═══════════════════════════════════════
+  // 5) 요일별 순변화 (dowFlows)
+  // ═══════════════════════════════════════
+
+  const dowFlows: DowFlow[] = [];
+
+  // 평일만 (월~금)
+  const weekdayIndices = [1, 2, 3, 4, 5]; // mon=1, tue=2, wed=3, thu=4, fri=5
+
+  for (const dayIdx of weekdayIndices) {
+    const dowName = DAY_NAMES[dayIdx]; // "mon", "tue", ...
+    const dowLabel = DOW_LABELS[dayIdx]; // "월", "화", ...
+
+    // 이탈 고객 중 해당 요일에 주문하던 고객 수
+    const churnedOnDay = churnedRows.filter((r) => {
+      const orderDays = parseOrderDayField(r.order_day);
+      return orderDays.includes(dowName);
+    }).length;
+
+    // 신규 고객 중 해당 요일에 주문하는 고객 수
+    const newOnDay = newRows.filter((r) => {
+      const orderDays = parseOrderDayField(r.order_day);
+      return orderDays.includes(dowName);
+    }).length;
+
+    dowFlows.push({
+      dow: dowName,
+      dowLabel,
+      churned: churnedOnDay,
+      newCount: newOnDay,
+      net: newOnDay - churnedOnDay,
+    });
+  }
+
+  // ═══════════════════════════════════════
+  // 6) summary (증감 포함)
+  // ═══════════════════════════════════════
+
+  const churnedCount = churnedRows.length;
+  const newCount = newRows.length;
+  const convertedCount = convertedRows.length;
+
+  const prevChurnedCount = Number(prevChurnedRows[0]?.cnt ?? 0);
+  const prevNewCount = Number(prevNewRows[0]?.cnt ?? 0);
+  const prevConvertedCount = Number(prevConvertedRows[0]?.cnt ?? 0);
+
+  return {
+    startDate,
+    endDate,
+    changes,
+    summary: {
+      churned: churnedCount,
+      new: newCount,
+      converted: convertedCount,
+      netFlow: newCount + convertedCount - churnedCount,
+      churnedDelta: churnedCount - prevChurnedCount,
+      newDelta: newCount - prevNewCount,
+      convertedDelta: convertedCount - prevConvertedCount,
+      prevChurned: prevChurnedCount,
+      prevNew: prevNewCount,
+      prevConverted: prevConvertedCount,
+    },
+    dowFlows,
+  };
 }

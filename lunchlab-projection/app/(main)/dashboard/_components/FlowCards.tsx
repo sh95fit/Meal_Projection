@@ -1,4 +1,4 @@
-// app/(main)/dashboard/_components/FlowCards.tsx
+// app/(main)/dashboard/_components/FlowCards.tsx (전체 교체)
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,16 +9,40 @@ interface Props {
     new: number;
     converted: number;
     netFlow: number;
+    churnedDelta: number;
+    newDelta: number;
+    convertedDelta: number;
+    prevChurned: number;
+    prevNew: number;
+    prevConverted: number;
   };
 }
 
-export function FlowCards({ summary }: Props) {
-  const { churned, converted, netFlow } = summary;
-  const newCount = summary.new;
+function DeltaText({ delta }: { delta: number }) {
+  if (delta === 0) return <span className="text-xs text-gray-400">전기 대비 — 변동 없음</span>;
+  const isUp = delta > 0;
+  const color = isUp ? "text-red-500" : "text-green-500";
+  return (
+    <span className={`text-xs ${color}`}>
+      전기 대비 {isUp ? "▲" : "▼"} {Math.abs(delta)}건
+    </span>
+  );
+}
 
-  // 순유입 게이지 비율
-  const total = churned + newCount;
-  const newPct = total > 0 ? Math.round((newCount / total) * 100) : 50;
+function NewDeltaText({ delta }: { delta: number }) {
+  if (delta === 0) return <span className="text-xs text-gray-400">전기 대비 — 변동 없음</span>;
+  const isUp = delta > 0;
+  const color = isUp ? "text-green-500" : "text-red-500";
+  return (
+    <span className={`text-xs ${color}`}>
+      전기 대비 {isUp ? "▲" : "▼"} {Math.abs(delta)}건
+    </span>
+  );
+}
+
+export function FlowCards({ summary }: Props) {
+  const { churned, converted, netFlow, churnedDelta, newDelta, convertedDelta } = summary;
+  const newCount = summary.new;
 
   const cards = [
     {
@@ -26,28 +50,28 @@ export function FlowCards({ summary }: Props) {
       label: "이탈 고객사",
       value: churned,
       color: "text-red-600",
-      sub: `이탈 비중 ${total > 0 ? 100 - newPct : 50}%`,
+      delta: <DeltaText delta={churnedDelta} />,
     },
     {
       icon: "📈",
       label: "신규 고객사",
       value: newCount,
       color: "text-green-600",
-      sub: `신규 비중 ${newPct}%`,
+      delta: <NewDeltaText delta={newDelta} />,
     },
     {
       icon: "🔄",
       label: "전환예정",
       value: converted,
       color: "text-purple-600",
-      sub: "",
+      delta: <NewDeltaText delta={convertedDelta} />,
     },
     {
       icon: netFlow >= 0 ? "📊" : "⚠️",
       label: "순 유입",
       value: `${netFlow >= 0 ? "+" : ""}${netFlow}`,
       color: netFlow >= 0 ? "text-green-600" : "text-red-600",
-      sub: `${netFlow >= 0 ? "+" : ""}${newCount + converted - churned} 고객사`,
+      delta: null,
     },
   ];
 
@@ -63,13 +87,11 @@ export function FlowCards({ summary }: Props) {
             <span className="text-xs text-muted-foreground block mt-1">
               {c.label}
             </span>
-            {c.sub && (
-              <span className="text-[10px] text-muted-foreground block mt-1">
-                {c.sub}
-              </span>
+            {c.delta && (
+              <span className="block mt-1">{c.delta}</span>
             )}
 
-            {/* 순유입 카드에만 게이지 바 표시 */}
+            {/* 순유입 카드에만 게이지 바 */}
             {i === 3 && (
               <div className="h-1 rounded-full mt-2 w-3/5 mx-auto overflow-hidden bg-gray-200">
                 <div
