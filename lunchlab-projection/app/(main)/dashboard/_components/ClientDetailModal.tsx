@@ -39,7 +39,7 @@ export function ClientDetailModal({ open, loading, data, onClose }: Props) {
       <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {valid ? data.accountName : "고객사"} 상세
+            {valid ? data.accountName : "고객사"} 상세 정보
           </DialogTitle>
         </DialogHeader>
 

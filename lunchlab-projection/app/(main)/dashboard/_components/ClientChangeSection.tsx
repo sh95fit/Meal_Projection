@@ -93,11 +93,7 @@ export function ClientChangeSection({
             </p>
             <FlowCards summary={data.summary} />
             <GroupSummaryCards data={data} />
-            <DowChangeTable
-              flows={data.dowFlows}
-              scope={dowScope}
-              onScopeChange={onDowScopeChange}
-            />
+            <DowChangeTable flows={data.dowFlows} />
             <ClientListCards data={data} onClientClick={onClientClick} />
           </>
         )}

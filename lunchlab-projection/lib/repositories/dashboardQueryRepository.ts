@@ -22,6 +22,7 @@ import type {
   ClientChange,
   DowFlow,
   ClientChangeResponse,
+  DowFlowProductDetail,
 } from "@/types/dashboard";
 
 import { getProductColorMap } from "@/lib/repositories/productRepository";
@@ -1210,9 +1211,7 @@ export async function getClientChangeData(
       orderStatsMap.set(Number(row.account_id), {
         avgQty: Number(row.avg_qty) || 0,
         mainProduct: "",
-        lastOrderDate: row.last_order_date
-          ? String(row.last_order_date).slice(0, 10)
-          : "",
+        lastOrderDate: toDateStr(row.last_order_date) ?? "",
         productAvgs: [],
       });
     }
@@ -1263,6 +1262,28 @@ export async function getClientChangeData(
   // 4) changes 배열 구성
   // ═══════════════════════════════════════
 
+  // 날짜 포맷 헬퍼 (YYYY-MM-DD 형태로 통일)
+  function toDateStr(val: unknown): string | null {
+    if (!val) return null;
+    if (val instanceof Date) {
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, "0");
+      const d = String(val.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+    const str = String(val);
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, "0");
+      const d = String(parsed.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+    return null;
+  }
+  
+  // changes 배열 구성
   const changes: ClientChange[] = [];
 
   for (const row of churnedRows) {
@@ -1277,6 +1298,9 @@ export async function getClientChangeData(
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
       productAvgs: stats?.productAvgs ?? [],
+      terminateAt: toDateStr(row.terminate_at),
+      subscriptionAt: toDateStr(row.subscription_at),
+      subscriptionScheduledAt: null,
     });
   }
 
@@ -1292,6 +1316,9 @@ export async function getClientChangeData(
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
       productAvgs: stats?.productAvgs ?? [],
+      terminateAt: null,
+      subscriptionAt: toDateStr(row.subscription_at),
+      subscriptionScheduledAt: null,
     });
   }
 
@@ -1307,42 +1334,130 @@ export async function getClientChangeData(
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
       productAvgs: stats?.productAvgs ?? [],
+      terminateAt: null,
+      subscriptionAt: null,
+      subscriptionScheduledAt: toDateStr(row.subscription_scheduled_at),
     });
   }
 
   // ═══════════════════════════════════════
-  // 5) 요일별 순변화 (dowFlows)
+  // 5) 요일별 순변화 (dowFlows) — 평균/중간값 식수 합계
   // ═══════════════════════════════════════
 
   const dowFlows: DowFlow[] = [];
 
-  // 평일만 (월~금)
-  const weekdayIndices = [1, 2, 3, 4, 5]; // mon=1, tue=2, wed=3, thu=4, fri=5
+  // 토요일 포함: 월(1)~토(6)
+  const weekdayIndices = [1, 2, 3, 4, 5, 6];
+
+  // 중간값 헬퍼
+  function medianOf(arr: number[]): number {
+    if (arr.length === 0) return 0;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0
+      ? sorted[mid]
+      : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+  }
 
   for (const dayIdx of weekdayIndices) {
     const dowName = DAY_NAMES[dayIdx]; // "mon", "tue", ...
     const dowLabel = DOW_LABELS[dayIdx]; // "월", "화", ...
 
-    // 이탈 고객 중 해당 요일에 주문하던 고객 수
+    // ── 이탈 고객 중 해당 요일이 order_day에 포함된 고객사 ──
     const churnedOnDay = churnedRows.filter((r) => {
       const orderDays = parseOrderDayField(r.order_day);
       return orderDays.includes(dowName);
-    }).length;
+    });
 
-    // 신규 고객 중 해당 요일에 주문하는 고객 수
+    // ── 신규 고객 중 해당 요일이 order_day에 포함된 고객사 ──
     const newOnDay = newRows.filter((r) => {
       const orderDays = parseOrderDayField(r.order_day);
       return orderDays.includes(dowName);
-    }).length;
+    });
+
+    // 이탈 - 전체 평균/중간값 식수 합계
+    const churnedAvgs = churnedOnDay.map(
+      (r) => orderStatsMap.get(Number(r.id))?.avgQty ?? 0
+    );
+    const churnedAvgSum =
+      Math.round(churnedAvgs.reduce((s, v) => s + v, 0) * 10) / 10;
+    const churnedMedianSum =
+      churnedAvgs.length > 0
+        ? Math.round(medianOf(churnedAvgs) * churnedAvgs.length * 10) / 10
+        : 0;
+
+    // 신규 - 전체 평균/중간값 식수 합계
+    const newAvgs = newOnDay.map(
+      (r) => orderStatsMap.get(Number(r.id))?.avgQty ?? 0
+    );
+    const newAvgSum =
+      Math.round(newAvgs.reduce((s, v) => s + v, 0) * 10) / 10;
+    const newMedianSum =
+      newAvgs.length > 0
+        ? Math.round(medianOf(newAvgs) * newAvgs.length * 10) / 10
+        : 0;
+
+    // ── 상품별 집계 ──
+    const productMap = new Map<
+      string,
+      { churnedAvgs: number[]; newAvgs: number[] }
+    >();
+
+    for (const r of churnedOnDay) {
+      const stats = orderStatsMap.get(Number(r.id));
+      for (const pa of stats?.productAvgs ?? []) {
+        if (!productMap.has(pa.productName)) {
+          productMap.set(pa.productName, { churnedAvgs: [], newAvgs: [] });
+        }
+        productMap.get(pa.productName)!.churnedAvgs.push(pa.avg);
+      }
+    }
+
+    for (const r of newOnDay) {
+      const stats = orderStatsMap.get(Number(r.id));
+      for (const pa of stats?.productAvgs ?? []) {
+        if (!productMap.has(pa.productName)) {
+          productMap.set(pa.productName, { churnedAvgs: [], newAvgs: [] });
+        }
+        productMap.get(pa.productName)!.newAvgs.push(pa.avg);
+      }
+    }
+
+    const products: DowFlowProductDetail[] = Array.from(
+      productMap.entries()
+    ).map(([name, data]) => ({
+      productName: name,
+      churnedAvgSum:
+        Math.round(data.churnedAvgs.reduce((s, v) => s + v, 0) * 10) / 10,
+      churnedMedianSum:
+        data.churnedAvgs.length > 0
+          ? Math.round(
+              medianOf(data.churnedAvgs) * data.churnedAvgs.length * 10
+            ) / 10
+          : 0,
+      newAvgSum:
+        Math.round(data.newAvgs.reduce((s, v) => s + v, 0) * 10) / 10,
+      newMedianSum:
+        data.newAvgs.length > 0
+          ? Math.round(
+              medianOf(data.newAvgs) * data.newAvgs.length * 10
+            ) / 10
+          : 0,
+    }));
 
     dowFlows.push({
       dow: dowName,
       dowLabel,
-      churned: churnedOnDay,
-      newCount: newOnDay,
-      net: newOnDay - churnedOnDay,
+      churnedAvgSum,
+      churnedMedianSum,
+      newAvgSum,
+      newMedianSum,
+      netAvg: Math.round((newAvgSum - churnedAvgSum) * 10) / 10,
+      netMedian: Math.round((newMedianSum - churnedMedianSum) * 10) / 10,
+      products,
     });
   }
+
 
   // ═══════════════════════════════════════
   // 6) summary (증감 포함)
