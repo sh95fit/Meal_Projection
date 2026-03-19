@@ -1,5 +1,5 @@
-// ──────────────────────────────────────────────────────────────────
 // lib/repositories/productRepository.ts
+// ──────────────────────────────────────────────────────────────────
 // Supabase products 테이블 CRUD + 색상 관리
 // ──────────────────────────────────────────────────────────────────
 import { createClient } from "@/lib/supabase/server";
@@ -7,12 +7,21 @@ import { getRandomProductColor, isValidHexColor, PRESET_COLORS } from "@/lib/uti
 import type { Product, ProductWithMappings } from "@/types";
 
 // ──────────────────────────────────────────────────────────────────
-// A. Input 타입
+// A. 공통 상수
+// ──────────────────────────────────────────────────────────────────
+
+/** 상품 테이블 SELECT 대상 컬럼 (단일 관리) */
+const PRODUCT_SELECT_FIELDS =
+  "id, product_name, offset_days, saturday_available, notification_group, color, deleted_at, created_at, updated_at" as const;
+
+// ──────────────────────────────────────────────────────────────────
+// B. Input 타입
 // ──────────────────────────────────────────────────────────────────
 
 export interface CreateProductInput {
   product_name: string;
   offset_days?: number;
+  saturday_available?: boolean;
   notification_group?: string;
   color?: string;
 }
@@ -20,12 +29,13 @@ export interface CreateProductInput {
 export interface UpdateProductInput {
   product_name?: string;
   offset_days?: number;
+  saturday_available?: boolean;
   notification_group?: string;
   color?: string;
 }
 
 // ──────────────────────────────────────────────────────────────────
-// B. 조회
+// C. 조회
 // ──────────────────────────────────────────────────────────────────
 
 /** 전체 상품 + 매핑 목록 조회 (ProductTable용) */
@@ -34,7 +44,7 @@ export async function getAllProductsWithMappings(): Promise<ProductWithMappings[
 
   const { data: products, error: pErr } = await supabase
     .from("products")
-    .select("id, product_name, offset_days, notification_group, color, deleted_at, created_at, updated_at")
+    .select(PRODUCT_SELECT_FIELDS)
     .is("deleted_at", null)
     .order("id", { ascending: true });
 
@@ -60,6 +70,7 @@ export async function getAllProductsWithMappings(): Promise<ProductWithMappings[
 
   return (products || []).map((row, idx) => ({
     ...row,
+    saturday_available: row.saturday_available ?? false,
     color: row.color || PRESET_COLORS[idx % PRESET_COLORS.length],
     mappings: mappingsByProduct.get(row.id) || [],
   }));
@@ -70,7 +81,7 @@ export async function getAllProducts(): Promise<Product[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("products")
-    .select("id, product_name, offset_days, notification_group, color, deleted_at, created_at, updated_at")
+    .select(PRODUCT_SELECT_FIELDS)
     .is("deleted_at", null)
     .order("id", { ascending: true });
 
@@ -78,6 +89,7 @@ export async function getAllProducts(): Promise<Product[]> {
 
   return (data || []).map((row, idx) => ({
     ...row,
+    saturday_available: row.saturday_available ?? false,
     color: row.color || PRESET_COLORS[idx % PRESET_COLORS.length],
   }));
 }
@@ -87,16 +99,20 @@ export async function getProductById(id: number): Promise<Product> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("products")
-    .select("id, product_name, offset_days, notification_group, color, deleted_at, created_at, updated_at")
+    .select(PRODUCT_SELECT_FIELDS)
     .eq("id", id)
     .single();
 
   if (error) throw new Error(error.message);
-  return { ...data, color: data.color || "#818cf8" };
+  return {
+    ...data,
+    saturday_available: data.saturday_available ?? false,
+    color: data.color || "#818cf8",
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────
-// C. 색상 전용 조회 (대시보드 차트용)
+// D. 색상 전용 조회 (대시보드 차트용)
 // ──────────────────────────────────────────────────────────────────
 
 export async function getProductColorMap(): Promise<Map<string, string>> {
@@ -129,7 +145,7 @@ export async function getUsedColors(): Promise<string[]> {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// D. 생성
+// E. 생성
 // ──────────────────────────────────────────────────────────────────
 
 export async function createProduct(input: CreateProductInput): Promise<Product> {
@@ -148,18 +164,19 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
     .insert({
       product_name: input.product_name,
       offset_days: input.offset_days ?? 3,
+      saturday_available: input.saturday_available ?? false,
       notification_group: input.notification_group || null,
       color,
     })
-    .select("id, product_name, offset_days, notification_group, color, deleted_at, created_at, updated_at")
+    .select(PRODUCT_SELECT_FIELDS)
     .single();
 
   if (error) throw new Error(error.message);
-  return data;
+  return { ...data, saturday_available: data.saturday_available ?? false };
 }
 
 // ──────────────────────────────────────────────────────────────────
-// E. 수정
+// F. 수정
 // ──────────────────────────────────────────────────────────────────
 
 export async function updateProduct(id: number, input: UpdateProductInput): Promise<Product> {
@@ -168,6 +185,7 @@ export async function updateProduct(id: number, input: UpdateProductInput): Prom
 
   if (input.product_name !== undefined) updates.product_name = input.product_name;
   if (input.offset_days !== undefined) updates.offset_days = input.offset_days;
+  if (input.saturday_available !== undefined) updates.saturday_available = input.saturday_available;
   if (input.notification_group !== undefined) updates.notification_group = input.notification_group;
 
   if (input.color !== undefined) {
@@ -185,15 +203,15 @@ export async function updateProduct(id: number, input: UpdateProductInput): Prom
     .from("products")
     .update(updates)
     .eq("id", id)
-    .select("id, product_name, offset_days, notification_group, color, deleted_at, created_at, updated_at")
+    .select(PRODUCT_SELECT_FIELDS)
     .single();
 
   if (error) throw new Error(error.message);
-  return data;
+  return { ...data, saturday_available: data.saturday_available ?? false };
 }
 
 // ──────────────────────────────────────────────────────────────────
-// F. 삭제 (soft delete)
+// G. 삭제 (soft delete)
 // ──────────────────────────────────────────────────────────────────
 
 export async function deleteProduct(id: number): Promise<Product> {
@@ -202,16 +220,15 @@ export async function deleteProduct(id: number): Promise<Product> {
     .from("products")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", id)
-    .select("id, product_name, offset_days, notification_group, color, deleted_at, created_at, updated_at")
+    .select(PRODUCT_SELECT_FIELDS)
     .single();
 
   if (error) throw new Error(error.message);
-  return data;
+  return { ...data, saturday_available: data.saturday_available ?? false };
 }
 
-
 // ──────────────────────────────────────────────────────────────────
-// G. 상품 ID 매핑 조회 (orderQueryRepository용)
+// H. 상품 ID 매핑 조회 (orderQueryRepository용)
 // ──────────────────────────────────────────────────────────────────
 
 export interface ProductMapping {

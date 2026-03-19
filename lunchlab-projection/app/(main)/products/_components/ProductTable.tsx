@@ -1,6 +1,9 @@
+// app/(main)/products/_components/ProductTable.tsx
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
 import { Pencil, Trash2 } from "lucide-react";
 import type { ProductWithMappings } from "@/types";
 
@@ -34,18 +37,39 @@ export function ProductTable({ products, onEdit, onDelete }: Props) {
               />
             </TableCell>
             <TableCell className="font-medium">{p.product_name}</TableCell>
-            <TableCell>D+{p.offset_days}</TableCell>
-            <TableCell>{p.notification_group || <span className="text-muted-foreground">-</span>}</TableCell>
+            <TableCell>
+              <div className="flex items-center gap-1.5">
+                <span>D+{p.offset_days}</span>
+                {p.saturday_available ? (
+                  <Badge variant="default" className="text-[11px] px-1.5 py-0">
+                    토 포함
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[11px] px-1.5 py-0 text-muted-foreground">
+                    월~금
+                  </Badge>
+                )}
+              </div>
+            </TableCell>
+            <TableCell>
+              {p.notification_group || (
+                <span className="text-muted-foreground">-</span>
+              )}
+            </TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-1">
                 {(p.mappings ?? []).map((m) => (
-                  <Badge key={m.id} variant="secondary">{m.channel}: {m.external_id}</Badge>
+                  <Badge key={m.id} variant="secondary">
+                    {m.channel}: {m.external_id}
+                  </Badge>
                 ))}
               </div>
             </TableCell>
             <TableCell>
               <div className="flex gap-1">
-                <Button variant="ghost" size="sm" onClick={() => onEdit(p)}><Pencil className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="sm" onClick={() => onEdit(p)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
                 <Button variant="ghost" size="sm" onClick={() => onDelete(p.id)}>
                   <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>
