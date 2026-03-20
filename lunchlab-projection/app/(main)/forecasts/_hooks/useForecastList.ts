@@ -1,6 +1,7 @@
+// app/(main)/forecasts/_hooks/useForecastList.ts
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { apiGet, apiPut, apiPost } from "@/lib/api";
 import { useProductStore } from "@/lib/stores/useProductStore";
@@ -8,8 +9,6 @@ import type { OrderForecast, ProductWithMappings } from "@/types";
 
 export function useForecastList() {
   const [forecasts, setForecasts] = useState<OrderForecast[]>([]);
-  // zustand 미사용
-  // const [products, setProducts] = useState<ProductWithMappings[]>([]);
   const { products, fetchProducts } = useProductStore();
   const [loading, setLoading] = useState(true);
 
@@ -34,16 +33,15 @@ export function useForecastList() {
   const [adjustQty, setAdjustQty] = useState(0);
   const [adjustReason, setAdjustReason] = useState("");
 
-  
-  // useEffect(() => {
-  //   fetch("/api/products").then((r) => r.json()).then(setProducts).catch(() => {});
-  // }, []);
+  // ★ 중복 제출 방지 플래그
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [isActualSubmitting, setIsActualSubmitting] = useState(false);
+  const [isAdjustSubmitting, setIsAdjustSubmitting] = useState(false);
 
   // ─── 상품 로드 (Zustand store 사용) ───
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
-
 
   const fetchForecasts = useCallback(async () => {
     setLoading(true);
@@ -68,11 +66,15 @@ export function useForecastList() {
   const openEditDialog = (f: OrderForecast) => {
     setEditTarget(f);
     setEditQty(f.forecast_qty);
+    setIsEditSubmitting(false); // ★ 다이얼로그 열 때 초기화
     setEditDialog(true);
   };
 
   const handleEdit = async () => {
     if (!editTarget) return;
+    if (isEditSubmitting) return; // ★ 중복 방지
+    setIsEditSubmitting(true);   // ★ 잠금
+
     const previousQty = editTarget.forecast_qty;
     try {
       await apiPut(`/api/forecasts/${editTarget.id}`, { forecast_qty: editQty });
@@ -90,6 +92,7 @@ export function useForecastList() {
       fetchForecasts();
     } catch {
       toast.error("수정에 실패했습니다.");
+      setIsEditSubmitting(false); // ★ 실패 시 재시도 허용
     }
   };
 
@@ -97,11 +100,15 @@ export function useForecastList() {
   const openActualDialog = (f: OrderForecast) => {
     setActualTarget(f);
     setActualQty(f.actual_qty || f.forecast_qty);
+    setIsActualSubmitting(false); // ★ 다이얼로그 열 때 초기화
     setActualDialog(true);
   };
 
   const handleActual = async () => {
     if (!actualTarget) return;
+    if (isActualSubmitting) return; // ★ 중복 방지
+    setIsActualSubmitting(true);   // ★ 잠금
+
     try {
       await apiPut(`/api/forecasts/${actualTarget.id}/actual`, { actual_qty: actualQty });
       toast.success("확정 수량이 기입되었습니다.");
@@ -109,6 +116,7 @@ export function useForecastList() {
       fetchForecasts();
     } catch {
       toast.error("기입에 실패했습니다.");
+      setIsActualSubmitting(false); // ★ 실패 시 재시도 허용
     }
   };
 
@@ -117,11 +125,15 @@ export function useForecastList() {
     setAdjustTarget(f);
     setAdjustQty(f.forecast_qty);
     setAdjustReason("");
+    setIsAdjustSubmitting(false); // ★ 다이얼로그 열 때 초기화
     setAdjustDialog(true);
   };
 
   const handleAdjust = async () => {
     if (!adjustTarget) return;
+    if (isAdjustSubmitting) return; // ★ 중복 방지
+    setIsAdjustSubmitting(true);   // ★ 잠금
+
     try {
       const result = await apiPost<{
         previous_qty: number;
@@ -148,6 +160,7 @@ export function useForecastList() {
       fetchForecasts();
     } catch {
       toast.error("조정에 실패했습니다.");
+      setIsAdjustSubmitting(false); // ★ 실패 시 재시도 허용
     }
   };
 
@@ -163,12 +176,12 @@ export function useForecastList() {
     selectedProductIds, toggleProductFilter,
     // edit
     editDialog, setEditDialog, editTarget, editQty, setEditQty,
-    openEditDialog, handleEdit,
+    openEditDialog, handleEdit, isEditSubmitting,           // ★ 추가
     // actual
     actualDialog, setActualDialog, actualTarget, actualQty, setActualQty,
-    openActualDialog, handleActual,
+    openActualDialog, handleActual, isActualSubmitting,     // ★ 추가
     // adjust
     adjustDialog, setAdjustDialog, adjustTarget, adjustQty, setAdjustQty,
-    adjustReason, setAdjustReason, openAdjustDialog, handleAdjust,
+    adjustReason, setAdjustReason, openAdjustDialog, handleAdjust, isAdjustSubmitting, // ★ 추가
   };
 }

@@ -12,9 +12,10 @@ interface Props {
   qty: number;
   onQtyChange: (v: number) => void;
   onSubmit: () => void;
+  isSubmitting?: boolean; // ★ 추가
 }
 
-export function EditDialog({ open, onOpenChange, target, qty, onQtyChange, onSubmit }: Props) {
+export function EditDialog({ open, onOpenChange, target, qty, onQtyChange, onSubmit, isSubmitting }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -33,12 +34,17 @@ export function EditDialog({ open, onOpenChange, target, qty, onQtyChange, onSub
                 onQtyChange(isNaN(parsed) ? 0 : parsed);
               }}
               min={0}
+              disabled={isSubmitting} // ★ 전송 중 입력 비활성화
             />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>취소</Button>
-          <Button onClick={onSubmit}>수정 및 알림 발송</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+            취소
+          </Button>
+          <Button onClick={onSubmit} disabled={isSubmitting}>
+            {isSubmitting ? "발송 중..." : "수정 및 알림 발송"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
