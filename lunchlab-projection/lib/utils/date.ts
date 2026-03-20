@@ -237,14 +237,49 @@ export function getProductDeliveryDate(
  * 대시보드 실시간 섹션의 기본 조회 날짜를 반환합니다.
  *
  * 규칙:
- *   - 현재 KST 14:30 이전 → 오늘 기준 +1 영업일
- *   - 현재 KST 14:30 이후 → 오늘 기준 +2 영업일
+ *   - KST 14:30 이전 → 다음 영업일 1개
+ *   - KST 14:30 이후 → 다음+2 영업일
+ *     단, 토요일 포함 상품이 있으므로 토+월 묶음이면 둘 다 반환
+ *
+ * ★ 복수 날짜를 반환합니다 (토+월 묶음 대응)
  */
-export function getDefaultRealtimeDate(): string {
+export function getDefaultRealtimeDates(): string[] {
   const { dateStr, hour, minute } = getKSTNow();
   const currentMinutes = hour * 60 + minute;
   const cutoff = 14 * 60 + 30;
 
-  const offset = currentMinutes < cutoff ? 1 : 2;
-  return getNthBusinessDay(dateStr, offset);
+  if (currentMinutes < cutoff) {
+    // 마감 전: 다음 영업일 1개
+    return [getNthBusinessDay(dateStr, 1)];
+  }
+
+  // 마감 후: 다음 영업일부터 탐색
+  const first = getNthBusinessDay(dateStr, 1);
+  const [fy, fm, fd] = first.split("-").map(Number);
+  const firstDay = new Date(fy, fm - 1, fd).getDay();
+
+  if (firstDay === 6) {
+    // 다음 영업일이 토요일 → 토+월 묶음
+    // 월요일 찾기 (토요일 다음 영업일)
+    const monday = getNthBusinessDay(first, 1);
+    return [first, monday];
+  }
+
+  // 일반적인 경우: 2번째 영업일
+  const second = getNthBusinessDay(dateStr, 2);
+  const [sy, sm, sd] = second.split("-").map(Number);
+  const secondDay = new Date(sy, sm - 1, sd).getDay();
+
+  if (secondDay === 6) {
+    // 2번째 영업일이 토요일 → 토+월 묶음이므로 토, 월 둘 다
+    const monday = getNthBusinessDay(second, 1);
+    return [second, monday];
+  }
+
+  return [second];
+}
+
+// 기존 함수도 호환성을 위해 유지 (첫 번째 날짜 반환)
+export function getDefaultRealtimeDate(): string {
+  return getDefaultRealtimeDates()[0];
 }

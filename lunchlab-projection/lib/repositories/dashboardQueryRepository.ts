@@ -14,7 +14,7 @@
 
 import { queryMySQL } from "@/lib/mysql/client";
 import { createClient } from "@/lib/supabase/server";
-import { getToday, addDays } from "@/lib/utils/date";
+import { getToday, addDays, isHoliday } from "@/lib/utils/date";
 import { parseOrderDay, toDateStr } from "@/lib/utils/format";
 import {
   CUTOFF_HOUR,
@@ -111,7 +111,9 @@ async function loadProductMappingMap(): Promise<ProductMappingMap> {
  * 주어진 배송일에 대해 앱 주문(selected_menus)을 별도 합산해야 하는지 판단합니다.
  *
  * 비즈니스 규칙:
- *   배송일 D의 주문 마감 = D-1일(전날) 14:30 KST
+ *   배송일 D의 주문 마감 = D 이전 가장 가까운 영업일(월~금)의 14:30 KST
+ *   ★ 토요일 배송 → 마감 = 금요일 14:30
+ *   ★ 월요일 배송 → 마감 = 금요일 14:30 (토·일은 비영업)
  *   마감 전 → 합산 필요 (true), 마감 후 → orders만 사용 (false)
  */
 function needsAppMenuMerge(dateStr: string): boolean {
@@ -119,8 +121,25 @@ function needsAppMenuMerge(dateStr: string): boolean {
   const [y, m, d] = dateStr.split("-").map(Number);
   const deliveryDate = new Date(y, m - 1, d);
 
+  // 배송일 이전 가장 가까운 평일(월~금)을 찾음
   const deadlineDate = new Date(deliveryDate);
   deadlineDate.setDate(deadlineDate.getDate() - 1);
+
+  // 마감일이 토·일이면 금요일까지 거슬러 올라감
+  while (deadlineDate.getDay() === 0 || deadlineDate.getDay() === 6) {
+    deadlineDate.setDate(deadlineDate.getDate() - 1);
+  }
+
+  // 마감일이 공휴일이면 더 거슬러 올라감
+  let deadlineDateStr = `${deadlineDate.getFullYear()}-${String(deadlineDate.getMonth() + 1).padStart(2, "0")}-${String(deadlineDate.getDate()).padStart(2, "0")}`;
+  while (isHoliday(deadlineDateStr)) {
+    deadlineDate.setDate(deadlineDate.getDate() - 1);
+    // 토·일도 다시 건너뜀
+    while (deadlineDate.getDay() === 0 || deadlineDate.getDay() === 6) {
+      deadlineDate.setDate(deadlineDate.getDate() - 1);
+    }
+    deadlineDateStr = `${deadlineDate.getFullYear()}-${String(deadlineDate.getMonth() + 1).padStart(2, "0")}-${String(deadlineDate.getDate()).padStart(2, "0")}`;
+  }
 
   const deadlineUTC = Date.UTC(
     deadlineDate.getFullYear(),
