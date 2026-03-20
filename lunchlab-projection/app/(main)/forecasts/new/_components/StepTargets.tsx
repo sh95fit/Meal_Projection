@@ -59,11 +59,11 @@ export function StepTargets({ targets, products, onAddTarget, onUpdateTarget, on
                 <span className="text-sm font-semibold text-primary whitespace-nowrap min-w-[100px]">
                   {formatDateWithDay(target.deliveryDate)}
                 </span>
-                {target.product.saturday_available && (
+                {/* {target.product.saturday_available && (
                   <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
                     토 판매
                   </span>
-                )}
+                )} */}
               </div>
             </div>
             <Button variant="ghost" size="sm" onClick={() => onRemoveTarget(idx)}>

@@ -66,27 +66,51 @@ export function getDayIndex(dateStr: string): number {
 /**
  * 대한민국 공휴일 (MM-DD 형식, 연도별)
  * ※ 매년 초에 해당 연도를 추가합니다. 추후 공공데이터 API 연동 권장.
- *
- * 다른 모듈(forecast, dashboard 등)에서도 참조할 수 있도록 export합니다.
  */
 export const HOLIDAYS_BY_YEAR: Record<string, string[]> = {
+  "2025": [
+    "01-01", // 신정 (수)
+    "01-27", // 임시공휴일 - 설 연휴 확대 (월)
+    "01-28", // 설날 연휴 (화)
+    "01-29", // 설날 (수)
+    "01-30", // 설날 연휴 (목)
+    "03-01", // 삼일절 (토)
+    "03-03", // 대체공휴일 - 삼일절 (월)
+    "05-05", // 어린이날 + 부처님오신날 (월)
+    "05-06", // 대체공휴일 - 부처님오신날 (화)
+    "06-03", // 제21대 대통령선거일 (화)
+    "06-06", // 현충일 (금)
+    "08-15", // 광복절 (금)
+    "10-03", // 개천절 (금)
+    "10-05", // 추석 연휴 (일)
+    "10-06", // 추석 (월)
+    "10-07", // 추석 연휴 (화)
+    "10-08", // 대체공휴일 - 추석 (수)
+    "10-09", // 한글날 (목)
+    "12-25", // 크리스마스 (목)
+  ],
   "2026": [
-    "01-01", // 신정
-    "02-16", // 설날 연휴
-    "02-17", // 설날
-    "02-18", // 설날 연휴
-    "03-01", // 삼일절 (일요일)
-    "05-05", // 어린이날
-    "05-24", // 부처님오신날 (일요일)
-    "06-06", // 현충일 (토요일)
-    "07-17", // 제헌절 (금요일)
-    "08-15", // 광복절 (토요일)
-    "09-24", // 추석 연휴
-    "09-25", // 추석
-    "09-26", // 추석 연휴 (토요일)
-    "10-03", // 개천절 (토요일)
-    "10-09", // 한글날
-    "12-25", // 크리스마스
+    "01-01", // 신정 (목)
+    "02-16", // 설날 연휴 (월)
+    "02-17", // 설날 (화)
+    "02-18", // 설날 연휴 (수)
+    "03-01", // 삼일절 (일)
+    // "03-02", // 대체공휴일 - 삼일절 (월)
+    "05-05", // 어린이날 (화)
+    "05-24", // 부처님오신날 (일)
+    // "05-25", // 대체공휴일 - 부처님오신날 (월)
+    "06-03", // 제9회 전국동시지방선거일 (수)
+    "06-06", // 현충일 (토)
+    "07-17", // 제헌절 (금)
+    "08-15", // 광복절 (토)
+    // "08-17", // 대체공휴일 - 광복절 (월)
+    "09-24", // 추석 연휴 (목)
+    "09-25", // 추석 (금)
+    "09-26", // 추석 연휴 (토)
+    "10-03", // 개천절 (토)
+    // "10-05", // 대체공휴일 - 개천절 (월)
+    "10-09", // 한글날 (금)
+    "12-25", // 크리스마스 (금)
   ],
 };
 
@@ -106,33 +130,8 @@ export function isHoliday(dateStr: string): boolean {
 export function isBusinessDay(dateStr: string): boolean {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(y, m - 1, d);
-  if (date.getDay() === 0) return false; // 일요일
+  if (date.getDay() === 0) return false;
   if (isHoliday(dateStr)) return false;
-  return true;
-}
-
-/**
- * 상품별 영업일 판단.
- * saturday_available = false인 상품은 토요일도 비영업일로 처리합니다.
- *
- * @param dateStr           날짜 "YYYY-MM-DD"
- * @param saturdayAvailable 해당 상품이 토요일 판매를 하는지
- */
-export function isProductBusinessDay(
-  dateStr: string,
-  saturdayAvailable: boolean
-): boolean {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  const day = date.getDay();
-
-  // 일요일은 항상 비영업일
-  if (day === 0) return false;
-  // 토요일 판매 안하는 상품이면 토요일도 비영업일
-  if (day === 6 && !saturdayAvailable) return false;
-  // 공휴일
-  if (isHoliday(dateStr)) return false;
-
   return true;
 }
 
@@ -144,7 +143,7 @@ export function isProductBusinessDay(
 export function getNthBusinessDay(fromDate: string, n: number): string {
   let candidate = fromDate;
   let count = 0;
-  for (let i = 0; i < 60; i++) { // 안전 상한 30→60으로 증가 (연휴 대응)
+  for (let i = 0; i < 60; i++) {
     candidate = addDays(candidate, 1);
     if (isBusinessDay(candidate)) {
       count++;
@@ -157,36 +156,79 @@ export function getNthBusinessDay(fromDate: string, n: number): string {
 /**
  * 상품별 출고일(배송일)을 영업일 기준으로 계산합니다.
  *
- * 오늘(산출일) 기준으로 N번째 "해당 상품의 영업일"을 반환합니다.
- * 토요일 판매 여부에 따라 토요일을 영업일로 카운트할지 결정합니다.
+ * ── 비즈니스 규칙 ──
+ * - 토요일 미포함: 영업일 = 월~금 (토·일·공휴일 건너뜀)
+ * - 토요일 포함:   영업일 = 월~금 + 토요일
+ *   단, 토요일은 월요일과 묶음으로 1회 카운트됩니다.
+ *   토요일이 카운트되면 월요일은 건너뜁니다.
+ *   출고일이 토,월 묶음에 해당하면 대표일(토요일)을 반환합니다.
+ *
+ * ── 예시: D+3 토요일 포함 ──
+ * 월 → 화(1) 수(2) 목(3) = 목
+ * 화 → 수(1) 목(2) 금(3) = 금
+ * 수 → 목(1) 금(2) 토+월(3) = 토  ← 관리자가 월요일 건 별도 추가
+ * 목 → 금(1) 토+월(2) 화(3) = 화
+ * 금 → 토+월(1) 화(2) 수(3) = 수
+ *
+ * ── 예시: D+3 토요일 미포함 ──
+ * 월 → 화(1) 수(2) 목(3) = 목
+ * 화 → 수(1) 목(2) 금(3) = 금
+ * 수 → 목(1) 금(2) 월(3) = 월
+ * 목 → 금(1) 월(2) 화(3) = 화
+ * 금 → 월(1) 화(2) 수(3) = 수
  *
  * @param fromDate           기준일(산출일) "YYYY-MM-DD"
  * @param offsetDays         상품의 D+N 값
  * @param saturdayAvailable  토요일 판매 여부
  * @returns 출고일 "YYYY-MM-DD"
- *
- * @example
- * // 토요일 비판매, D+4, 기준일이 월요일
- * getProductDeliveryDate("2026-03-16", 4, false)
- * // 월→화(1) →수(2) →목(3) →금(4) = "2026-03-20" (금요일)
- *
- * // 토요일 판매, D+3, 기준일이 수요일
- * getProductDeliveryDate("2026-03-18", 3, true)
- * // 수→목(1) →금(2) →토(3) = "2026-03-21" (토요일)
  */
 export function getProductDeliveryDate(
   fromDate: string,
   offsetDays: number,
   saturdayAvailable: boolean
 ): string {
+  // 토요일 미포함: 월~금만 영업일
+  if (!saturdayAvailable) {
+    let candidate = fromDate;
+    let count = 0;
+    for (let i = 0; i < 60; i++) {
+      candidate = addDays(candidate, 1);
+      const [cy, cm, cd] = candidate.split("-").map(Number);
+      const day = new Date(cy, cm - 1, cd).getDay();
+      if (day === 0 || day === 6) continue;
+      if (isHoliday(candidate)) continue;
+      count++;
+      if (count >= offsetDays) return candidate;
+    }
+    return candidate;
+  }
+
+  // 토요일 포함: 토+월 묶음으로 1회 카운트
   let candidate = fromDate;
   let count = 0;
   for (let i = 0; i < 60; i++) {
     candidate = addDays(candidate, 1);
-    if (isProductBusinessDay(candidate, saturdayAvailable)) {
+    const [cy, cm, cd] = candidate.split("-").map(Number);
+    const day = new Date(cy, cm - 1, cd).getDay();
+
+    // 일요일 건너뜀
+    if (day === 0) continue;
+    // 공휴일 건너뜀
+    if (isHoliday(candidate)) continue;
+
+    if (day === 6) {
+      // 토요일 = 토+월 묶음 → 1회 카운트, 대표일은 토요일
       count++;
       if (count >= offsetDays) return candidate;
+      // 월요일도 소진됐으므로 건너뜀 → candidate를 월요일로 이동
+      // 다음 루프에서 +1 하면 화요일부터 시작
+      candidate = addDays(candidate, 2); // 토 +2 = 월
+      continue;
     }
+
+    // 월~금 일반 영업일
+    count++;
+    if (count >= offsetDays) return candidate;
   }
   return candidate;
 }
@@ -201,7 +243,7 @@ export function getProductDeliveryDate(
 export function getDefaultRealtimeDate(): string {
   const { dateStr, hour, minute } = getKSTNow();
   const currentMinutes = hour * 60 + minute;
-  const cutoff = 14 * 60 + 30; // 14:30 = 870분
+  const cutoff = 14 * 60 + 30;
 
   const offset = currentMinutes < cutoff ? 1 : 2;
   return getNthBusinessDay(dateStr, offset);
