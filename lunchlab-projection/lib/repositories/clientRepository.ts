@@ -6,15 +6,17 @@
 //
 // [리팩토링 변경사항]
 // - 상수 → lib/constants/dashboard.ts에서 import (중복 제거)
-// - medianOf 삭제 → format.ts의 median + medianSum 헬퍼로 대체
+// - medianOf 삭제 → format.ts의 median 헬퍼로 대체
 // - getClientChangeData: 직렬 MySQL 쿼리 → Promise.all 병렬화
+// - dowFlows: 고객사별 전체 평균/중간 + 상품별 평균/중간을 요일별 합산
+// - 토요일: saturday_available = false 상품 제외
 // ──────────────────────────────────────────────────────────────────
 
 import { queryMySQL } from "@/lib/mysql/client";
 import { createClient } from "@/lib/supabase/server";
 import { getToday, addDays } from "@/lib/utils/date";
 import { getOrdersByDate } from "@/lib/repositories/dashboardQueryRepository";
-import { getProductColorMap } from "@/lib/repositories/productRepository";
+import { getProductColorMap, getAllProducts } from "@/lib/repositories/productRepository";
 import { PRESET_COLORS } from "@/lib/utils/color";
 import { toDateStr, parseOrderDay, median } from "@/lib/utils/format";
 import {
@@ -35,18 +37,7 @@ import type {
 // 내부 유틸
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * 숫자 배열의 중간값 × 배열 길이를 반환합니다.
- * dowFlows의 "중간값 식수 합계" 계산 전용.
- */
-function medianSum(arr: number[]): number {
-  if (arr.length === 0) return 0;
-  return Math.round(median(arr) * arr.length * 10) / 10;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// 내부 유틸: groupByCompany
-// ══════════════════════════════════════════════════════════════════
+// groupByCompany 등 기존 함수는 동일하므로 생략 없이 포함
 
 interface CompanySummary {
   accountId: number;
@@ -114,7 +105,7 @@ function groupByCompany(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 고객사 상세 모달 데이터 조회
+// 고객사 상세 모달 데이터 조회 (기존과 동일)
 // ══════════════════════════════════════════════════════════════════
 
 export async function getClientModalData(
@@ -347,6 +338,22 @@ export async function getClientModalData(
 // 고객 변동 현황 조회
 // ══════════════════════════════════════════════════════════════════
 
+/**
+ * 고객사별 주문 통계 (dowFlows 계산용)
+ * - avgQty       : 전체 일평균 수량
+ * - medianQty    : 전체 일중간 수량
+ * - mainProduct  : 주요 상품명
+ * - lastOrderDate: 마지막 주문일
+ * - productAvgs  : 상품별 { productName, avg, median }
+ */
+interface AccountOrderStats {
+  avgQty: number;
+  medianQty: number;
+  mainProduct: string;
+  lastOrderDate: string;
+  productAvgs: { productName: string; avg: number; median: number }[];
+}
+
 export async function getClientChangeData(
   startDate: string,
   endDate: string,
@@ -416,7 +423,7 @@ export async function getClientChangeData(
   ])) as [Record<string, unknown>[], Record<string, unknown>[], Record<string, unknown>[]];
 
   // ═══════════════════════════════════════
-  // 3) 각 고객사의 주문 통계 보강
+  // 3) 각 고객사의 주문 통계 보강 (★ 중간값 추가)
   // ═══════════════════════════════════════
 
   const allAccountIds = [
@@ -425,89 +432,114 @@ export async function getClientChangeData(
     ...convertedRows.map((r) => Number(r.id)),
   ];
 
-  const orderStatsMap = new Map<
-    number,
-    {
-      avgQty: number;
-      mainProduct: string;
-      lastOrderDate: string;
-      productAvgs: { productName: string; avg: number }[];
-    }
-  >();
+  const orderStatsMap = new Map<number, AccountOrderStats>();
 
   if (allAccountIds.length > 0) {
     const placeholders = allAccountIds.map(() => "?").join(",");
 
-    // ★ 통계 + 상품별 평균 병렬 조회
-    const [statsRows, productAvgRows] = (await Promise.all([
+    // ★ 일별 수량 raw 데이터 + 상품별 일별 수량 raw 데이터 병렬 조회
+    const [dailyRawRows, productDailyRawRows] = (await Promise.all([
+      // 고객사별 일별 전체 수량
       queryMySQL(
-        `SELECT daily.account_id,
-                ROUND(AVG(daily.day_total), 1) AS avg_qty,
-                MAX(daily.delivery_date) AS last_order_date
-         FROM (
-           SELECT o.account_id, o.delivery_date,
-                  SUM(od.quantity) AS day_total
-           FROM orders o
-           JOIN \`order-details\` od ON od.order_id = o.id
-           WHERE o.account_id IN (${placeholders})
-             AND o.deleted_at IS NULL AND od.deleted_at IS NULL
-             AND o.delivery_date >= '${DATA_START_DATE}'
-             AND od.product_id <> 21
-           GROUP BY o.account_id, o.delivery_date
-         ) AS daily
-         GROUP BY daily.account_id`,
+        `SELECT o.account_id, o.delivery_date,
+                CAST(SUM(od.quantity) AS SIGNED) AS day_total
+         FROM orders o
+         JOIN \`order-details\` od ON od.order_id = o.id
+         WHERE o.account_id IN (${placeholders})
+           AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+           AND o.delivery_date >= '${DATA_START_DATE}'
+           AND od.product_id <> 21
+         GROUP BY o.account_id, o.delivery_date
+         ORDER BY o.account_id, o.delivery_date`,
         allAccountIds
       ),
+      // 고객사별 상품별 일별 수량
       queryMySQL(
-        `SELECT daily.account_id, daily.product_name,
-                ROUND(AVG(daily.day_total), 1) AS avg_qty
-         FROM (
-           SELECT o.account_id, od.product_name, o.delivery_date,
-                  SUM(od.quantity) AS day_total
-           FROM orders o
-           JOIN \`order-details\` od ON od.order_id = o.id
-           WHERE o.account_id IN (${placeholders})
-             AND o.deleted_at IS NULL AND od.deleted_at IS NULL
-             AND o.delivery_date >= '${DATA_START_DATE}'
-             AND od.product_id <> 21
-           GROUP BY o.account_id, od.product_name, o.delivery_date
-         ) AS daily
-         GROUP BY daily.account_id, daily.product_name
-         ORDER BY daily.account_id, avg_qty DESC`,
+        `SELECT o.account_id, od.product_name, o.delivery_date,
+                CAST(SUM(od.quantity) AS SIGNED) AS day_total
+         FROM orders o
+         JOIN \`order-details\` od ON od.order_id = o.id
+         WHERE o.account_id IN (${placeholders})
+           AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+           AND o.delivery_date >= '${DATA_START_DATE}'
+           AND od.product_id <> 21
+         GROUP BY o.account_id, od.product_name, o.delivery_date
+         ORDER BY o.account_id, od.product_name, o.delivery_date`,
         allAccountIds
       ),
     ])) as [Record<string, unknown>[], Record<string, unknown>[]];
 
-    for (const row of statsRows) {
-      orderStatsMap.set(Number(row.account_id), {
-        avgQty: Number(row.avg_qty) || 0,
+    // --- 고객사별 전체 일별 수량 배열 구성 → 평균 + 중간값 ---
+    const dailyByAccount = new Map<number, number[]>();
+    for (const row of dailyRawRows) {
+      const aid = Number(row.account_id);
+      const qty = Number(row.day_total) || 0;
+      if (qty <= 0) continue;
+      if (!dailyByAccount.has(aid)) dailyByAccount.set(aid, []);
+      dailyByAccount.get(aid)!.push(qty);
+    }
+
+    for (const aid of allAccountIds) {
+      const qtyArr = dailyByAccount.get(aid) || [];
+      const avgQty =
+        qtyArr.length > 0
+          ? Math.round((qtyArr.reduce((s, q) => s + q, 0) / qtyArr.length) * 10) / 10
+          : 0;
+      const medianQty = median(qtyArr);
+      // 마지막 주문일
+      const lastRow = dailyRawRows
+        .filter((r) => Number(r.account_id) === aid)
+        .pop();
+      const lastOrderDate = lastRow ? toDateStr(lastRow.delivery_date) ?? "" : "";
+
+      orderStatsMap.set(aid, {
+        avgQty,
+        medianQty,
         mainProduct: "",
-        lastOrderDate: toDateStr(row.last_order_date) ?? "",
+        lastOrderDate,
         productAvgs: [],
       });
     }
 
-    const tempMap = new Map<
-      number,
-      { productName: string; avg: number }[]
-    >();
-    for (const row of productAvgRows) {
+    // --- 고객사별 상품별 일별 수량 배열 → 상품별 평균 + 중간값 ---
+    // Map<accountId, Map<productName, number[]>>
+    const productDailyByAccount = new Map<number, Map<string, number[]>>();
+    for (const row of productDailyRawRows) {
       const aid = Number(row.account_id);
-      if (!tempMap.has(aid)) tempMap.set(aid, []);
-      tempMap.get(aid)!.push({
-        productName: String(row.product_name || ""),
-        avg: Number(row.avg_qty) || 0,
-      });
+      const pName = String(row.product_name || "");
+      const qty = Number(row.day_total) || 0;
+      if (qty <= 0 || !pName) continue;
+      if (!productDailyByAccount.has(aid)) productDailyByAccount.set(aid, new Map());
+      const pMap = productDailyByAccount.get(aid)!;
+      if (!pMap.has(pName)) pMap.set(pName, []);
+      pMap.get(pName)!.push(qty);
     }
 
-    for (const [aid, prods] of tempMap) {
-      const existing = orderStatsMap.get(aid);
-      if (existing) {
-        existing.productAvgs = prods;
-        if (prods.length > 0) {
-          existing.mainProduct = prods[0].productName;
+    for (const [aid, pMap] of productDailyByAccount) {
+      const stats = orderStatsMap.get(aid);
+      if (!stats) continue;
+
+      const prodArr: { productName: string; avg: number; median: number }[] = [];
+      let maxAvg = 0;
+      let mainProduct = "";
+
+      for (const [pName, qtyArr] of pMap) {
+        const avg =
+          qtyArr.length > 0
+            ? Math.round((qtyArr.reduce((s, q) => s + q, 0) / qtyArr.length) * 10) / 10
+            : 0;
+        const med = median(qtyArr);
+        prodArr.push({ productName: pName, avg, median: med });
+        if (avg > maxAvg) {
+          maxAvg = avg;
+          mainProduct = pName;
         }
       }
+
+      // 평균 내림차순 정렬
+      prodArr.sort((a, b) => b.avg - a.avg);
+      stats.productAvgs = prodArr;
+      stats.mainProduct = mainProduct;
     }
   }
 
@@ -528,7 +560,10 @@ export async function getClientChangeData(
       currentAvg: 0,
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
-      productAvgs: stats?.productAvgs ?? [],
+      productAvgs: (stats?.productAvgs ?? []).map((pa) => ({
+        productName: pa.productName,
+        avg: pa.avg,
+      })),
       terminateAt: toDateStr(row.terminate_at),
       subscriptionAt: toDateStr(row.subscription_at),
       subscriptionScheduledAt: null,
@@ -546,7 +581,10 @@ export async function getClientChangeData(
       currentAvg: stats?.avgQty ?? 0,
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
-      productAvgs: stats?.productAvgs ?? [],
+      productAvgs: (stats?.productAvgs ?? []).map((pa) => ({
+        productName: pa.productName,
+        avg: pa.avg,
+      })),
       terminateAt: null,
       subscriptionAt: toDateStr(row.subscription_at),
       subscriptionScheduledAt: null,
@@ -564,7 +602,10 @@ export async function getClientChangeData(
       currentAvg: stats?.avgQty ?? 0,
       mainProduct: stats?.mainProduct ?? "",
       lastOrderDate: stats?.lastOrderDate ?? null,
-      productAvgs: stats?.productAvgs ?? [],
+      productAvgs: (stats?.productAvgs ?? []).map((pa) => ({
+        productName: pa.productName,
+        avg: pa.avg,
+      })),
       terminateAt: null,
       subscriptionAt: null,
       subscriptionScheduledAt: toDateStr(row.subscription_scheduled_at),
@@ -572,16 +613,32 @@ export async function getClientChangeData(
   }
 
   // ═══════════════════════════════════════
-  // 5) 요일별 순변화 (dowFlows)
+  // 5) 요일별 순변화 (dowFlows) — ★ 전면 수정
+  //
+  // 산출 방식:
+  //   각 고객사별로 전체 평균/중간값, 상품별 평균/중간값을 미리 구함 (orderStatsMap)
+  //   요일별로 해당 요일을 이용하는 고객사만 필터링
+  //   → 그 고객사들의 전체 평균 합산, 전체 중간값 합산
+  //   → 상품별 평균 합산, 상품별 중간값 합산
+  //   토요일: saturday_available = false인 상품은 제외
   // ═══════════════════════════════════════
 
+  // ★ Supabase에서 상품별 saturday_available 조회
+  const allProducts = await getAllProducts();
+  const saturdayAvailableMap = new Map<string, boolean>();
+  for (const p of allProducts) {
+    saturdayAvailableMap.set(p.product_name, p.saturday_available);
+  }
+
   const dowFlows: DowFlow[] = [];
-  const weekdayIndices = [1, 2, 3, 4, 5, 6];
+  const weekdayIndices = [1, 2, 3, 4, 5, 6]; // 월~토
 
   for (const dayIdx of weekdayIndices) {
-    const dowName = DAY_NAMES[dayIdx];
-    const dowLabel = DOW_LABELS[dayIdx];
+    const dowName = DAY_NAMES[dayIdx]; // "mon", "tue", ..., "sat"
+    const dowLabel = DOW_LABELS[dayIdx]; // "월", "화", ..., "토"
+    const isSaturday = dayIdx === 6;
 
+    // 해당 요일을 이용하는 이탈/신규 고객사 필터
     const churnedOnDay = churnedRows.filter((r) => {
       const days = parseOrderDay(r.order_day);
       return days.includes(dowName);
@@ -592,62 +649,130 @@ export async function getClientChangeData(
       return days.includes(dowName);
     });
 
-    const churnedAvgs = churnedOnDay.map(
-      (r) => orderStatsMap.get(Number(r.id))?.avgQty ?? 0
-    );
-    const churnedAvgSum =
-      Math.round(churnedAvgs.reduce((s, v) => s + v, 0) * 10) / 10;
-    const churnedMedianSum = medianSum(churnedAvgs);
+    // --- 전체 평균/중간값 합산 ---
+    // 이탈: 각 고객사의 전체 평균을 합산, 전체 중간값을 합산
+    let churnedAvgSum = 0;
+    let churnedMedianSum = 0;
+    for (const r of churnedOnDay) {
+      const stats = orderStatsMap.get(Number(r.id));
+      if (!stats) continue;
+      churnedAvgSum += stats.avgQty;
+      churnedMedianSum += stats.medianQty;
+    }
+    churnedAvgSum = Math.round(churnedAvgSum * 10) / 10;
+    churnedMedianSum = Math.round(churnedMedianSum * 10) / 10;
 
-    const newAvgs = newOnDay.map(
-      (r) => orderStatsMap.get(Number(r.id))?.avgQty ?? 0
-    );
-    const newAvgSum =
-      Math.round(newAvgs.reduce((s, v) => s + v, 0) * 10) / 10;
-    const newMedianSum = medianSum(newAvgs);
+    // 신규: 동일
+    let newAvgSum = 0;
+    let newMedianSum = 0;
+    for (const r of newOnDay) {
+      const stats = orderStatsMap.get(Number(r.id));
+      if (!stats) continue;
+      newAvgSum += stats.avgQty;
+      newMedianSum += stats.medianQty;
+    }
+    newAvgSum = Math.round(newAvgSum * 10) / 10;
+    newMedianSum = Math.round(newMedianSum * 10) / 10;
 
+    // --- 상품별 평균/중간값 합산 ---
+    // ★ 토요일이면 saturday_available = false인 상품 제외
     const productMap = new Map<
       string,
-      { churnedAvgs: number[]; newAvgs: number[] }
+      {
+        churnedAvgSum: number;
+        churnedMedianSum: number;
+        newAvgSum: number;
+        newMedianSum: number;
+      }
     >();
 
     for (const r of churnedOnDay) {
       const stats = orderStatsMap.get(Number(r.id));
-      for (const pa of stats?.productAvgs ?? []) {
+      if (!stats) continue;
+      for (const pa of stats.productAvgs) {
+        // ★ 토요일에는 saturday_available = false 상품 제외
+        if (isSaturday && saturdayAvailableMap.get(pa.productName) === false) {
+          continue;
+        }
         if (!productMap.has(pa.productName)) {
           productMap.set(pa.productName, {
-            churnedAvgs: [],
-            newAvgs: [],
+            churnedAvgSum: 0,
+            churnedMedianSum: 0,
+            newAvgSum: 0,
+            newMedianSum: 0,
           });
         }
-        productMap.get(pa.productName)!.churnedAvgs.push(pa.avg);
+        const entry = productMap.get(pa.productName)!;
+        entry.churnedAvgSum += pa.avg;
+        entry.churnedMedianSum += pa.median;
       }
     }
 
     for (const r of newOnDay) {
       const stats = orderStatsMap.get(Number(r.id));
-      for (const pa of stats?.productAvgs ?? []) {
+      if (!stats) continue;
+      for (const pa of stats.productAvgs) {
+        // ★ 토요일에는 saturday_available = false 상품 제외
+        if (isSaturday && saturdayAvailableMap.get(pa.productName) === false) {
+          continue;
+        }
         if (!productMap.has(pa.productName)) {
           productMap.set(pa.productName, {
-            churnedAvgs: [],
-            newAvgs: [],
+            churnedAvgSum: 0,
+            churnedMedianSum: 0,
+            newAvgSum: 0,
+            newMedianSum: 0,
           });
         }
-        productMap.get(pa.productName)!.newAvgs.push(pa.avg);
+        const entry = productMap.get(pa.productName)!;
+        entry.newAvgSum += pa.avg;
+        entry.newMedianSum += pa.median;
       }
     }
 
+    // ★ 토요일 전체 합산도 saturday_available 상품만 반영
+    if (isSaturday) {
+      // 토요일의 전체 평균/중간은 saturday_available 상품의 합산만
+      churnedAvgSum = 0;
+      churnedMedianSum = 0;
+      newAvgSum = 0;
+      newMedianSum = 0;
+
+      for (const r of churnedOnDay) {
+        const stats = orderStatsMap.get(Number(r.id));
+        if (!stats) continue;
+        for (const pa of stats.productAvgs) {
+          if (saturdayAvailableMap.get(pa.productName) === false) continue;
+          churnedAvgSum += pa.avg;
+          churnedMedianSum += pa.median;
+        }
+      }
+
+      for (const r of newOnDay) {
+        const stats = orderStatsMap.get(Number(r.id));
+        if (!stats) continue;
+        for (const pa of stats.productAvgs) {
+          if (saturdayAvailableMap.get(pa.productName) === false) continue;
+          newAvgSum += pa.avg;
+          newMedianSum += pa.median;
+        }
+      }
+
+      churnedAvgSum = Math.round(churnedAvgSum * 10) / 10;
+      churnedMedianSum = Math.round(churnedMedianSum * 10) / 10;
+      newAvgSum = Math.round(newAvgSum * 10) / 10;
+      newMedianSum = Math.round(newMedianSum * 10) / 10;
+    }
+
+    // 상품별 상세 배열 생성 (소수점 정리)
     const productsArr: DowFlowProductDetail[] = Array.from(
       productMap.entries()
     ).map(([name, data]) => ({
       productName: name,
-      churnedAvgSum:
-        Math.round(data.churnedAvgs.reduce((s, v) => s + v, 0) * 10) /
-        10,
-      churnedMedianSum: medianSum(data.churnedAvgs),
-      newAvgSum:
-        Math.round(data.newAvgs.reduce((s, v) => s + v, 0) * 10) / 10,
-      newMedianSum: medianSum(data.newAvgs),
+      churnedAvgSum: Math.round(data.churnedAvgSum * 10) / 10,
+      churnedMedianSum: Math.round(data.churnedMedianSum * 10) / 10,
+      newAvgSum: Math.round(data.newAvgSum * 10) / 10,
+      newMedianSum: Math.round(data.newMedianSum * 10) / 10,
     }));
 
     dowFlows.push({
@@ -658,8 +783,7 @@ export async function getClientChangeData(
       newAvgSum,
       newMedianSum,
       netAvg: Math.round((newAvgSum - churnedAvgSum) * 10) / 10,
-      netMedian:
-        Math.round((newMedianSum - churnedMedianSum) * 10) / 10,
+      netMedian: Math.round((newMedianSum - churnedMedianSum) * 10) / 10,
       products: productsArr,
     });
   }
