@@ -15,9 +15,10 @@ interface Props {
   reason: string;
   onReasonChange: (v: string) => void;
   onSubmit: () => void;
+  isSubmitting?: boolean; // ★ 추가
 }
 
-export function AdjustDialog({ open, onOpenChange, target, qty, onQtyChange, reason, onReasonChange, onSubmit }: Props) {
+export function AdjustDialog({ open, onOpenChange, target, qty, onQtyChange, reason, onReasonChange, onSubmit, isSubmitting }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -37,16 +38,26 @@ export function AdjustDialog({ open, onOpenChange, target, qty, onQtyChange, rea
                 onQtyChange(isNaN(parsed) ? 0 : parsed);
               }}
               min={0}
+              disabled={isSubmitting}
             />
           </div>
           <div className="space-y-2">
             <Label>사유</Label>
-            <Textarea value={reason} onChange={(e) => onReasonChange(e.target.value)} placeholder="예: 조기 품절" />
+            <Textarea
+              value={reason}
+              onChange={(e) => onReasonChange(e.target.value)}
+              placeholder="예: 조기 품절"
+              disabled={isSubmitting}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>취소</Button>
-          <Button onClick={onSubmit}>조정 및 알림 발송</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+            취소
+          </Button>
+          <Button onClick={onSubmit} disabled={isSubmitting}>
+            {isSubmitting ? "발송 중..." : "조정 및 알림 발송"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
