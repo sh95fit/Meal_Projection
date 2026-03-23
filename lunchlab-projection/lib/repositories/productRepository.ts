@@ -5,6 +5,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { getRandomProductColor, isValidHexColor, PRESET_COLORS } from "@/lib/utils/color";
 import type { Product, ProductWithMappings } from "@/types";
+import { cached } from "@/lib/cache";
+import { invalidateCacheByPrefix } from "@/lib/cache";
 
 // ──────────────────────────────────────────────────────────────────
 // A. 공통 상수
@@ -78,20 +80,21 @@ export async function getAllProductsWithMappings(): Promise<ProductWithMappings[
 
 /** 전체 상품 목록 조회 (매핑 불필요한 경우) */
 export async function getAllProducts(): Promise<Product[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("products")
-    .select(PRODUCT_SELECT_FIELDS)
-    .is("deleted_at", null)
-    .order("id", { ascending: true });
+  return cached("allProducts", 5 * 60 * 1000, async () => {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("products")
+      .select(PRODUCT_SELECT_FIELDS)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    if (error) throw new Error(error.message);
 
-  if (error) throw new Error(error.message);
-
-  return (data || []).map((row, idx) => ({
-    ...row,
-    saturday_available: row.saturday_available ?? false,
-    color: row.color || PRESET_COLORS[idx % PRESET_COLORS.length],
-  }));
+    return (data || []).map((row, idx) => ({
+      ...row,
+      saturday_available: row.saturday_available ?? false,
+      color: row.color || PRESET_COLORS[idx % PRESET_COLORS.length],
+    }));
+  });
 }
 
 /** 상품 1건 조회 */
@@ -114,23 +117,23 @@ export async function getProductById(id: number): Promise<Product> {
 // ──────────────────────────────────────────────────────────────────
 // D. 색상 전용 조회 (대시보드 차트용)
 // ──────────────────────────────────────────────────────────────────
-
 export async function getProductColorMap(): Promise<Map<string, string>> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("products")
-    .select("product_name, color")
-    .is("deleted_at", null);
+  return cached("productColorMap", 5 * 60 * 1000, async () => {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("products")
+      .select("product_name, color")
+      .is("deleted_at", null);
+    if (error) throw new Error(error.message);
 
-  if (error) throw new Error(error.message);
-
-  const map = new Map<string, string>();
-  if (data) {
-    data.forEach((row, idx) => {
-      map.set(row.product_name, row.color || PRESET_COLORS[idx % PRESET_COLORS.length]);
-    });
-  }
-  return map;
+    const map = new Map<string, string>();
+    if (data) {
+      data.forEach((row, idx) => {
+        map.set(row.product_name, row.color || PRESET_COLORS[idx % PRESET_COLORS.length]);
+      });
+    }
+    return map;
+  });
 }
 
 export async function getUsedColors(): Promise<string[]> {
@@ -172,6 +175,9 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
     .single();
 
   if (error) throw new Error(error.message);
+
+  invalidateCacheByPrefix("product"); 
+  invalidateCacheByPrefix("allProducts");  
   return { ...data, saturday_available: data.saturday_available ?? false };
 }
 
@@ -207,6 +213,9 @@ export async function updateProduct(id: number, input: UpdateProductInput): Prom
     .single();
 
   if (error) throw new Error(error.message);
+
+  invalidateCacheByPrefix("product"); 
+  invalidateCacheByPrefix("allProducts");  
   return { ...data, saturday_available: data.saturday_available ?? false };
 }
 
@@ -224,6 +233,9 @@ export async function deleteProduct(id: number): Promise<Product> {
     .single();
 
   if (error) throw new Error(error.message);
+
+  invalidateCacheByPrefix("product");  
+  invalidateCacheByPrefix("allProducts");  
   return { ...data, saturday_available: data.saturday_available ?? false };
 }
 
