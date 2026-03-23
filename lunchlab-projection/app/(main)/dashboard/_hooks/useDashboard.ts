@@ -1,4 +1,4 @@
-// app/(main)/dashboard/_hooks/useDashboard.ts (전체 교체)
+// app/(main)/dashboard/_hooks/useDashboard.ts
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -17,9 +17,11 @@ import type {
 const REFRESH_INTERVAL = 3 * 60 * 1000;
 
 export function useDashboard() {
-  // ─── ★ 캐시 (useRef → 렌더 간 유지, refreshAll 시 초기화) ───
+  // ─── 캐시 ───
   const trendCacheRef = useRef<Map<string, TrendResponse>>(new Map());
   const clientsCacheRef = useRef<Map<string, ClientChangeResponse>>(new Map());
+  // ★ #4: 드릴다운 캐시
+  const drilldownCacheRef = useRef<Map<string, DrilldownDetailResponse>>(new Map());
 
   // ─── 실시간 섹션 ───
   const [realtimeDate, setRealtimeDateState] = useState<string>(() => getDefaultRealtimeDate());
@@ -58,11 +60,9 @@ export function useDashboard() {
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ★ ref로 최신 필터 상태를 항상 추적
   const realtimeDateRef = useRef(realtimeDate);
   realtimeDateRef.current = realtimeDate;
 
-  // ★ 실시간 fetch의 요청 ID — 마지막 요청만 반영
   const realtimeRequestIdRef = useRef(0);
 
   const trendStateRef = useRef({
@@ -87,17 +87,12 @@ export function useDashboard() {
     customEnd: clientCustomEnd,
   };
 
-  // ★ 초기 로드 완료 여부 (useEffect 가드용)
   const initializedRef = useRef(false);
-
-  // ★ 마지막으로 fetch한 쿼리 문자열을 기억 → 동일 쿼리 중복 방지
   const lastTrendQueryRef = useRef<string>("");
   const lastClientQueryRef = useRef<string>("");
-
-  // ★ 실시간 날짜 변경 debounce 타이머
   const realtimeDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ─── Fetch 함수들 (모두 deps=[] → 참조 안정) ───
+  // ─── Fetch 함수들 ───
 
   const fetchRealtime = useCallback(async (date?: string) => {
     const targetDate = date || realtimeDateRef.current;
@@ -106,10 +101,7 @@ export function useDashboard() {
     try {
       setRealtimeLoading(true);
       const data = await apiGet<RealtimeResponse>(`/api/dashboard/realtime?date=${targetDate}`);
-
-      // ★ 응답 도착 시점에 최신 요청인지 확인 — 아니면 무시
       if (requestId !== realtimeRequestIdRef.current) return;
-
       setRealtime(data);
     } catch (err) {
       if (requestId !== realtimeRequestIdRef.current) return;
@@ -123,8 +115,6 @@ export function useDashboard() {
 
   const fetchTrend = useCallback(async (force?: boolean) => {
     const { preset, customStart, customEnd } = trendStateRef.current;
-
-    // ★ custom 모드인데 날짜가 불완전하면 fetch하지 않음
     if (preset === "custom" && (!customStart || !customEnd)) return;
 
     let query: string;
@@ -134,11 +124,9 @@ export function useDashboard() {
       query = `preset=${preset}`;
     }
 
-    // ★ 동일 쿼리면 skip (force=true일 때는 무시)
     if (!force && query === lastTrendQueryRef.current) return;
     lastTrendQueryRef.current = query;
 
-    // ★ 캐시 적중 확인 (force가 아닌 경우)
     if (!force) {
       const cached = trendCacheRef.current.get(query);
       if (cached) {
@@ -151,7 +139,6 @@ export function useDashboard() {
       setTrendLoading(true);
       const data = await apiGet<TrendResponse>(`/api/dashboard/trend?${query}`);
       setTrend(data);
-      // ★ 캐시에 저장
       trendCacheRef.current.set(query, data);
     } catch (err) {
       console.error("[Dashboard] trend fetch error:", err);
@@ -162,8 +149,6 @@ export function useDashboard() {
 
   const fetchClients = useCallback(async (force?: boolean) => {
     const { preset, customStart, customEnd } = clientStateRef.current;
-
-    // ★ custom 모드인데 날짜가 불완전하면 fetch하지 않음
     if (preset === "custom" && (!customStart || !customEnd)) return;
 
     const today = getToday();
@@ -193,11 +178,9 @@ export function useDashboard() {
       url = `/api/dashboard/clients?start=${start}&end=${today}&preset=${preset}`;
     }
 
-    // ★ 동일 쿼리면 skip (force=true일 때는 무시)
     if (!force && url === lastClientQueryRef.current) return;
     lastClientQueryRef.current = url;
 
-    // ★ 캐시 적중 확인 (force가 아닌 경우)
     if (!force) {
       const cached = clientsCacheRef.current.get(url);
       if (cached) {
@@ -210,7 +193,6 @@ export function useDashboard() {
       setClientsLoading(true);
       const data = await apiGet<ClientChangeResponse>(url);
       setClients(data);
-      // ★ 캐시에 저장
       clientsCacheRef.current.set(url, data);
     } catch (err) {
       console.error("[Dashboard] clients fetch error:", err);
@@ -219,18 +201,21 @@ export function useDashboard() {
     }
   }, []);
 
-  // ─── 전체 새로고침 ───
+  // ─── ★ #2: 전체 새로고침 — 3개 완전 병렬 ───
   const refreshAll = useCallback(async () => {
     setLoading(true);
-    // ★ force refresh이므로 캐시 초기화
     trendCacheRef.current.clear();
     clientsCacheRef.current.clear();
+    drilldownCacheRef.current.clear();
     lastTrendQueryRef.current = "";
     lastClientQueryRef.current = "";
 
-    await fetchRealtime();
-    // ★ force=true로 중복 방지 우회
-    await Promise.all([fetchTrend(true), fetchClients(true)]);
+    // ★ realtime을 기다리지 않고 3개 전부 병렬 시작
+    await Promise.all([
+      fetchRealtime(),
+      fetchTrend(true),
+      fetchClients(true),
+    ]);
     initializedRef.current = true;
     setLoading(false);
   }, [fetchRealtime, fetchTrend, fetchClients]);
@@ -239,16 +224,25 @@ export function useDashboard() {
     await fetchRealtime();
   }, [fetchRealtime]);
 
-  // ─── 드릴다운 ───
+  // ─── ★ #4: 드릴다운 — 캐시 적용 ───
   const openDrilldown = useCallback(async (date: string) => {
     setDrilldownDate(date);
     setDrilldownOpen(true);
+
+    // 캐시 적중 시 즉시 반환
+    const cached = drilldownCacheRef.current.get(date);
+    if (cached) {
+      setDrilldownDetail(cached);
+      return;
+    }
+
     setDrilldownLoading(true);
     try {
       const data = await apiGet<DrilldownDetailResponse>(
         `/api/dashboard/drilldown/detail?date=${date}`
       );
       setDrilldownDetail(data);
+      drilldownCacheRef.current.set(date, data);
     } catch (err) {
       console.error("[Dashboard] drilldown detail fetch error:", err);
       setDrilldownDetail(null);
@@ -287,7 +281,7 @@ export function useDashboard() {
     setClientModalData(null);
   }, []);
 
-  // ─── 추이 차트 필터 핸들러 ───
+  // ─── 필터 핸들러 ───
   const setTrendPreset = useCallback((p: PeriodPreset) => {
     _setTrendPreset(p);
     if (p !== "custom") {
@@ -311,7 +305,6 @@ export function useDashboard() {
     });
   }, []);
 
-  // ─── 고객 변동 필터 핸들러 ───
   const setClientPreset = useCallback((p: PeriodPreset) => {
     _setClientPreset(p);
     if (p !== "custom") {
@@ -326,7 +319,6 @@ export function useDashboard() {
     _setClientCustomEnd(end);
   }, []);
 
-  // ─── 실시간 날짜 변경 ───
   const setRealtimeDate = useCallback((date: string) => {
     setRealtimeDateState(date);
   }, []);
@@ -337,19 +329,16 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── ★ 실시간 날짜 변경 시 debounce + 이전 응답 무시 ───
+  // ─── 실시간 날짜 변경 debounce ───
   useEffect(() => {
     if (!initializedRef.current) return;
 
-    // 이전 debounce 타이머 취소
     if (realtimeDebounceRef.current) {
       clearTimeout(realtimeDebounceRef.current);
     }
 
-    // ★ 즉시 로딩 표시 (날짜 변경 시 바로 로딩 UI로 전환)
     setRealtimeLoading(true);
 
-    // ★ 300ms debounce — 빠르게 여러 번 변경해도 마지막 것만 fetch
     realtimeDebounceRef.current = setTimeout(() => {
       fetchRealtime(realtimeDate);
     }, 300);
@@ -362,7 +351,7 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeDate]);
 
-  // ─── ★ 추이 차트: 필터 변경 시에만 fetch (16ms 배칭 + 동일 쿼리 skip + 캐시) ───
+  // ─── 추이 차트 필터 변경 ───
   useEffect(() => {
     if (!initializedRef.current) return;
     const timer = setTimeout(() => {
@@ -372,7 +361,7 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trendPreset, trendCustomStart, trendCustomEnd]);
 
-  // ─── ★ 고객 변동: 동일한 패턴 ───
+  // ─── 고객 변동 필터 변경 ───
   useEffect(() => {
     if (!initializedRef.current) return;
     const timer = setTimeout(() => {
