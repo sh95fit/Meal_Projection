@@ -1,4 +1,4 @@
-// app/(main)/dashboard/_components/ClientDetailModal.tsx
+// app/(main)/dashboard/_components/ClientDetailModal.tsx (전체 교체)
 "use client";
 
 import { ReactElement, useState, useMemo } from "react";
@@ -118,7 +118,6 @@ export function ClientDetailModal({ open, loading, data, onClose }: Props) {
     return valid ? (data.productList ?? []) : [];
   }, [valid, data]);
 
-  // 추이 데이터에 _total 키 추가 (상품별 모드 상단 합계 라벨용)
   const trendData = useMemo(() => {
     if (!valid) return [];
     return (data.recentTrend ?? []).map((row) => {
@@ -173,7 +172,6 @@ export function ClientDetailModal({ open, loading, data, onClose }: Props) {
                   <InfoRow label="전환 예정일" value={data.subscriptionScheduledAt} />
                 )}
 
-                {/* 주문 요일 */}
                 {data.orderDays && data.orderDays.length > 0 && (
                   <div className="flex items-center justify-between text-sm pt-1">
                     <span className="text-muted-foreground">주문 요일</span>
@@ -271,11 +269,10 @@ export function ClientDetailModal({ open, loading, data, onClose }: Props) {
                     contentStyle={{ fontSize: 12 }}
                     labelStyle={{ fontSize: 12, fontWeight: 600 }}
                     itemStyle={{ fontSize: 11, padding: "1px 0" }}
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    formatter={((value: any, name: any) => {
+                    formatter={((value: unknown, name: unknown) => {
                       const num = Number(value) || 0;
                       return [num.toLocaleString(), String(name ?? "")];
-                    }) as any}
+                    }) as (value: unknown, name: unknown) => [string, string]}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} iconSize={10} />
 
