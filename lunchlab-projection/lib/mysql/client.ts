@@ -1,3 +1,4 @@
+// lib/mysql/client.ts
 import { Client as SSHClient } from "ssh2";
 import mysql, { type RowDataPacket } from "mysql2/promise";
 import fs from "fs";
@@ -14,41 +15,23 @@ function getSSHPrivateKey(): string | Buffer {
   return fs.readFileSync(keyPath);
 }
 
-// ─── SSH 터널 캐싱 ───
-// 모듈 레벨 변수 — 서버리스 인스턴스가 살아있는 동안 유지됨
+// ─── ★ #9: 듀얼 SSH 커넥션 풀 ───
 
-let cachedSSH: SSHClient | null = null;
-let cachedStream: Duplex | null = null;
-let sshReady = false;
+interface SSHEntry {
+  ssh: SSHClient;
+  ready: boolean;
+}
 
-function createSSHTunnel(): Promise<{ stream: Duplex; ssh: SSHClient }> {
+const MAX_SSH_CONNECTIONS = 2;
+const sshPool: (SSHEntry | null)[] = new Array(MAX_SSH_CONNECTIONS).fill(null);
+let sshRoundRobin = 0;
+
+function createSSHConnection(): Promise<SSHClient> {
   return new Promise((resolve, reject) => {
     const ssh = new SSHClient();
-
     ssh
-      .on("ready", () => {
-        ssh.forwardOut(
-          "127.0.0.1",
-          0,
-          process.env.DB_HOST!,
-          parseInt(process.env.DB_PORT || "3306"),
-          (err, stream) => {
-            if (err) {
-              ssh.end();
-              reject(err);
-              return;
-            }
-            resolve({ stream, ssh });
-          }
-        );
-      })
-      .on("error", (err) => {
-        // 캐시된 연결이 끊어졌으면 초기화
-        cachedSSH = null;
-        cachedStream = null;
-        sshReady = false;
-        reject(err);
-      })
+      .on("ready", () => resolve(ssh))
+      .on("error", (err) => reject(err))
       .connect({
         host: process.env.SSH_HOST!,
         port: parseInt(process.env.SSH_PORT || "22"),
@@ -58,12 +41,56 @@ function createSSHTunnel(): Promise<{ stream: Duplex; ssh: SSHClient }> {
   });
 }
 
-async function getSSHTunnel(): Promise<{ stream: Duplex; ssh: SSHClient }> {
-  // 캐시된 SSH가 살아있으면 새 포트 포워딩 스트림만 생성
-  if (cachedSSH && sshReady) {
+async function getSSHClient(index: number): Promise<SSHClient> {
+  const entry = sshPool[index];
+
+  if (entry && entry.ready) {
+    return entry.ssh;
+  }
+
+  // 기존 연결이 있으면 정리
+  if (entry) {
     try {
+      entry.ssh.end();
+    } catch {
+      // ignore
+    }
+    sshPool[index] = null;
+  }
+
+  const ssh = await createSSHConnection();
+
+  ssh.on("close", () => {
+    if (sshPool[index]?.ssh === ssh) {
+      sshPool[index] = null;
+    }
+  });
+
+  ssh.on("error", () => {
+    if (sshPool[index]?.ssh === ssh) {
+      sshPool[index] = null;
+    }
+  });
+
+  sshPool[index] = { ssh, ready: true };
+  return ssh;
+}
+
+function getNextSSHIndex(): number {
+  const idx = sshRoundRobin % MAX_SSH_CONNECTIONS;
+  sshRoundRobin++;
+  return idx;
+}
+
+async function forwardOutFromPool(): Promise<{ stream: Duplex }> {
+  const idx = getNextSSHIndex();
+
+  // 최대 2회 재시도 (SSH 연결이 죽었을 경우)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ssh = await getSSHClient(idx);
       const stream = await new Promise<Duplex>((resolve, reject) => {
-        cachedSSH!.forwardOut(
+        ssh.forwardOut(
           "127.0.0.1",
           0,
           process.env.DB_HOST!,
@@ -74,29 +101,15 @@ async function getSSHTunnel(): Promise<{ stream: Duplex; ssh: SSHClient }> {
           }
         );
       });
-      return { stream, ssh: cachedSSH };
+      return { stream };
     } catch {
-      // 캐시된 SSH가 죽었으면 새로 만듦
-      cachedSSH = null;
-      cachedStream = null;
-      sshReady = false;
+      // SSH 연결 끊김 → 재생성 시도
+      sshPool[idx] = null;
+      if (attempt === 1) throw new Error(`SSH forward failed after retries (pool index ${idx})`);
     }
   }
 
-  // 새 SSH 터널 생성
-  const tunnel = await createSSHTunnel();
-  cachedSSH = tunnel.ssh;
-  cachedStream = tunnel.stream;
-  sshReady = true;
-
-  // SSH 연결 종료 이벤트 감지
-  tunnel.ssh.on("close", () => {
-    cachedSSH = null;
-    cachedStream = null;
-    sshReady = false;
-  });
-
-  return tunnel;
+  throw new Error("SSH forward failed");
 }
 
 // ─── 직접 연결용 풀 (SSH 없는 환경) ───
@@ -113,8 +126,8 @@ function getDirectPool(): mysql.Pool {
       database: process.env.DB_ORDER_SERVICE || "order_service",
       waitForConnections: true,
       connectionLimit: 10,
-      queueLimit: 50, 
-      idleTimeout: 60000,       // 60초 동안 안 쓰면 연결 해제
+      queueLimit: 50,
+      idleTimeout: 60000,
       enableKeepAlive: true,
       keepAliveInitialDelay: 10000,
     });
@@ -122,7 +135,8 @@ function getDirectPool(): mysql.Pool {
   return directPool;
 }
 
-// ─── 동시 실행 제어를 위한 세마포어 ───
+// ─── 세마포어 ───
+
 class Semaphore {
   private queue: (() => void)[] = [];
   private running = 0;
@@ -153,7 +167,9 @@ class Semaphore {
 // ─── 공개 API ───
 
 const useSSH = !!(process.env.SSH_HOST && (process.env.SSH_PRIVATE_KEY || process.env.SSH_KEY_PATH));
-const querySemaphore = new Semaphore(useSSH ? 3 : 8);
+
+// ★ #9: SSH 시 세마포어 3→5 (듀얼 SSH로 처리량 증가)
+const querySemaphore = new Semaphore(useSSH ? 5 : 8);
 
 export async function queryMySQL<T = RowDataPacket>(
   sql: string,
@@ -177,18 +193,16 @@ async function queryViaSSH<T>(
   sql: string,
   params?: unknown[]
 ): Promise<T[]> {
-  const tunnel = await getSSHTunnel();
+  // ★ #9: 듀얼 SSH 풀에서 라운드 로빈으로 스트림 획득
+  const { stream } = await forwardOutFromPool();
 
-  // SSH 터널 위에 MySQL 연결 생성
-  // SSH 스트림은 재사용하지만 MySQL 연결은 매번 새로 만듦
-  // (SSH 스트림 위의 MySQL 연결을 풀링하면 스트림 충돌 위험)
   const connection = await mysql.createConnection({
     host: process.env.DB_HOST!,
     port: parseInt(process.env.DB_PORT || "3306"),
     user: process.env.DB_USER!,
     password: process.env.DB_PASSWORD!,
     database: process.env.DB_ORDER_SERVICE || "order_service",
-    stream: tunnel.stream,
+    stream,
   });
 
   try {
@@ -196,7 +210,6 @@ async function queryViaSSH<T>(
     return rows as T[];
   } finally {
     await connection.end();
-    // SSH는 닫지 않음 — 캐시해서 다음 쿼리에 재사용
   }
 }
 

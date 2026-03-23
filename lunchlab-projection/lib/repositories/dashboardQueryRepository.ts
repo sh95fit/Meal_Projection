@@ -10,6 +10,12 @@
 // - mergeOrders: productMappings 캐싱 지원 (loadProductMappingMap)
 // - getDrilldownDetailData: Supabase 중복 호출 통합
 // - formatDayLabel: 중복 파싱 제거
+//
+// [최적화 변경사항]
+// #3: getDrilldownDetailData — accounts 전체 스캔 → 관련 ID만 + 병렬화
+// #6: getDrilldownDetailData — products Supabase 직접 → getAllProducts() 캐시
+// #8: getTrendData — 벌크 쿼리에 trial 제외 조건 추가
+// 
 // ──────────────────────────────────────────────────────────────────
 
 import { queryMySQL } from "@/lib/mysql/client";
@@ -38,7 +44,7 @@ import type {
   WeekdayCaseSummary,
   QuantityAnomalyClient,
 } from "@/types/dashboard";
-import { getProductColorMap } from "@/lib/repositories/productRepository";
+import { getProductColorMap, getAllProducts } from "@/lib/repositories/productRepository";
 import { PRESET_COLORS } from "@/lib/utils/color";
 import { cached } from "@/lib/cache";
 
@@ -46,17 +52,15 @@ import { cached } from "@/lib/cache";
 // 내부 타입
 // ──────────────────────────────────────────────────────────────────
 
-/** mergeOrders에서 사용하는 상품 매핑 정보 */
 interface ProductMappingInfo {
   productId: number;
   productName: string;
 }
 
-/** "channel:externalId" → 내부 상품 정보 */
 type ProductMappingMap = Map<string, ProductMappingInfo>;
 
 // ──────────────────────────────────────────────────────────────────
-// 내부 유틸: resolveColor
+// 내부 유틸
 // ──────────────────────────────────────────────────────────────────
 
 function resolveColor(
@@ -71,13 +75,9 @@ function resolveColor(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 내부 헬퍼: loadProductMappingMap
+// loadProductMappingMap
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * Supabase에서 상품 매핑 정보를 로드합니다.
- * 반복 호출이 필요한 곳에서 1회 로드하여 재사용합니다.
- */
 async function loadProductMappingMap(): Promise<ProductMappingMap> {
   return cached("productMappingMap", 5 * 60 * 1000, async () => {
     const supabase = await createClient();
@@ -107,37 +107,24 @@ async function loadProductMappingMap(): Promise<ProductMappingMap> {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 헬퍼 #1: needsAppMenuMerge (내부 전용)
+// needsAppMenuMerge
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * 주어진 배송일에 대해 앱 주문(selected_menus)을 별도 합산해야 하는지 판단합니다.
- *
- * 비즈니스 규칙:
- *   배송일 D의 주문 마감 = D 이전 가장 가까운 영업일(월~금)의 14:30 KST
- *   ★ 토요일 배송 → 마감 = 금요일 14:30
- *   ★ 월요일 배송 → 마감 = 금요일 14:30 (토·일은 비영업)
- *   마감 전 → 합산 필요 (true), 마감 후 → orders만 사용 (false)
- */
 function needsAppMenuMerge(dateStr: string): boolean {
   const now = new Date();
   const [y, m, d] = dateStr.split("-").map(Number);
   const deliveryDate = new Date(y, m - 1, d);
 
-  // 배송일 이전 가장 가까운 평일(월~금)을 찾음
   const deadlineDate = new Date(deliveryDate);
   deadlineDate.setDate(deadlineDate.getDate() - 1);
 
-  // 마감일이 토·일이면 금요일까지 거슬러 올라감
   while (deadlineDate.getDay() === 0 || deadlineDate.getDay() === 6) {
     deadlineDate.setDate(deadlineDate.getDate() - 1);
   }
 
-  // 마감일이 공휴일이면 더 거슬러 올라감
   let deadlineDateStr = `${deadlineDate.getFullYear()}-${String(deadlineDate.getMonth() + 1).padStart(2, "0")}-${String(deadlineDate.getDate()).padStart(2, "0")}`;
   while (isHoliday(deadlineDateStr)) {
     deadlineDate.setDate(deadlineDate.getDate() - 1);
-    // 토·일도 다시 건너뜀
     while (deadlineDate.getDay() === 0 || deadlineDate.getDay() === 6) {
       deadlineDate.setDate(deadlineDate.getDate() - 1);
     }
@@ -157,7 +144,7 @@ function needsAppMenuMerge(dateStr: string): boolean {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 헬퍼 #2: getWebOrdersByDate
+// getWebOrdersByDate
 // ══════════════════════════════════════════════════════════════════
 
 async function getWebOrdersByDate(dateStr: string): Promise<
@@ -239,7 +226,7 @@ async function getWebOrdersByDate(dateStr: string): Promise<
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 헬퍼 #3: getAppOrdersByDate
+// getAppOrdersByDate
 // ══════════════════════════════════════════════════════════════════
 
 async function getAppOrdersByDate(dateStr: string): Promise<
@@ -284,16 +271,9 @@ async function getAppOrdersByDate(dateStr: string): Promise<
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 헬퍼 #4: mergeOrders
+// mergeOrders
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * 웹 주문과 앱 주문을 상품 매핑을 이용해 합산합니다.
- *
- * @param webOrders   getWebOrdersByDate 반환값
- * @param appOrders   getAppOrdersByDate 반환값
- * @param mappingMap  (선택) 사전 로드된 상품 매핑 — 미전달 시 내부 조회
- */
 async function mergeOrders(
   webOrders: Awaited<ReturnType<typeof getWebOrdersByDate>>,
   appOrders: Awaited<ReturnType<typeof getAppOrdersByDate>>,
@@ -352,29 +332,13 @@ async function mergeOrders(
   for (const row of webOrders) {
     const mapped = resolvedMap.get(`web:${row.externalProductId}`);
     if (!mapped) continue;
-    addToMerged(
-      row.accountId,
-      row.accountName,
-      mapped.productId,
-      mapped.productName,
-      row.quantity,
-      row.totalQty,
-      row.channel
-    );
+    addToMerged(row.accountId, row.accountName, mapped.productId, mapped.productName, row.quantity, row.totalQty, row.channel);
   }
 
   for (const row of appOrders) {
     const mapped = resolvedMap.get(`app:${row.externalProductId}`);
     if (!mapped) continue;
-    addToMerged(
-      row.accountId,
-      row.accountName,
-      mapped.productId,
-      mapped.productName,
-      row.quantity,
-      row.totalQty,
-      "app"
-    );
+    addToMerged(row.accountId, row.accountName, mapped.productId, mapped.productName, row.quantity, row.totalQty, "app");
   }
 
   const result: MergedOrder[] = [];
@@ -398,15 +362,9 @@ async function mergeOrders(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 헬퍼 #5: getOrdersByDate (진입점)
+// getOrdersByDate (진입점)
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * 지정 배송일의 전체 주문을 조회합니다.
- *
- * @param dateStr     배송일 "YYYY-MM-DD"
- * @param mappingMap  (선택) 사전 로드된 상품 매핑 — 반복 호출 시 캐싱용
- */
 export async function getOrdersByDate(
   dateStr: string,
   mappingMap?: ProductMappingMap
@@ -423,7 +381,7 @@ export async function getOrdersByDate(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 헬퍼 #6: formatDayLabel
+// formatDayLabel
 // ══════════════════════════════════════════════════════════════════
 
 function formatDayLabel(dateStr: string): string {
@@ -433,7 +391,7 @@ function formatDayLabel(dateStr: string): string {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 메인 쿼리 #1: getRealtimeData
+// getRealtimeData
 // ══════════════════════════════════════════════════════════════════
 
 export async function getRealtimeData(
@@ -442,7 +400,6 @@ export async function getRealtimeData(
   const deliveryDate = targetDate || getToday();
   const lastWeekDate = addDays(deliveryDate, -7);
 
-  // ★ 상품 매핑을 1회 로드하여 모든 getOrdersByDate에 재사용
   const mappingMap = await loadProductMappingMap();
 
   const [todayResult, lastWeekResult] = await Promise.all([
@@ -450,24 +407,13 @@ export async function getRealtimeData(
     getOrdersByDate(lastWeekDate, mappingMap),
   ]);
 
-  // ─── Supabase 예측값 조회 ───
   const supabase = await createClient();
   const { data: forecasts } = await supabase
     .from("order_forecasts")
-    .select(
-      "product_id, forecast_qty, confirmed_order_qty, additional_forecast_qty, buffer_qty"
-    )
+    .select("product_id, forecast_qty, confirmed_order_qty, additional_forecast_qty, buffer_qty")
     .eq("delivery_date", deliveryDate);
 
-  const forecastMap = new Map<
-    number,
-    {
-      forecastQty: number;
-      confirmedQty: number;
-      additionalQty: number;
-      bufferQty: number;
-    }
-  >();
+  const forecastMap = new Map<number, { forecastQty: number; confirmedQty: number; additionalQty: number; bufferQty: number }>();
   for (const f of forecasts || []) {
     forecastMap.set(Number(f.product_id), {
       forecastQty: Number(f.forecast_qty) || 0,
@@ -477,84 +423,27 @@ export async function getRealtimeData(
     });
   }
 
-  // // ─── forecast fallback: 최근 4주 같은 요일 평균 ───
-  // const hasForecast = forecastMap.size > 0;
-  // const fallbackMap = new Map<number, number>();
-
-  // if (!hasForecast) {
-  //   // ★ 4주 병렬 조회 + 매핑맵 재사용
-  //   const recentResults = await Promise.all(
-  //     [1, 2, 3, 4].map((i) =>
-  //       getOrdersByDate(addDays(deliveryDate, -7 * i), mappingMap)
-  //     )
-  //   );
-
-  //   const productTotals = new Map<number, { total: number; count: number }>();
-  //   for (const result of recentResults) {
-  //     const dateProductMap = new Map<number, number>();
-  //     for (const o of result.orders) {
-  //       dateProductMap.set(
-  //         o.productId,
-  //         (dateProductMap.get(o.productId) || 0) + o.quantity
-  //       );
-  //     }
-  //     for (const [pid, qty] of dateProductMap) {
-  //       const existing = productTotals.get(pid);
-  //       if (existing) {
-  //         existing.total += qty;
-  //         existing.count += 1;
-  //       } else {
-  //         productTotals.set(pid, { total: qty, count: 1 });
-  //       }
-  //     }
-  //   }
-  //   for (const [pid, data] of productTotals) {
-  //     fallbackMap.set(pid, Math.round(data.total / data.count));
-  //   }
-  // }
-
-  // ─── 상품별 집계 ───
   const todayByProduct = new Map<number, { name: string; qty: number }>();
   for (const o of todayResult.orders) {
     const existing = todayByProduct.get(o.productId);
     if (existing) existing.qty += o.quantity;
-    else
-      todayByProduct.set(o.productId, {
-        name: o.productName,
-        qty: o.quantity,
-      });
+    else todayByProduct.set(o.productId, { name: o.productName, qty: o.quantity });
   }
 
   const lastWeekByProduct = new Map<number, number>();
   for (const o of lastWeekResult.orders) {
-    lastWeekByProduct.set(
-      o.productId,
-      (lastWeekByProduct.get(o.productId) || 0) + o.quantity
-    );
+    lastWeekByProduct.set(o.productId, (lastWeekByProduct.get(o.productId) || 0) + o.quantity);
   }
 
-  // ★ 위에서 생성한 supabase 인스턴스 재사용
-  const { data: allProducts } = await supabase
-    .from("products")
-    .select("id, product_name")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: true });
+  // ★ #6 패턴: getAllProducts() 캐시 사용
+  const allProductsList = await getAllProducts();
 
-  const products: RealtimeProduct[] = (allProducts || []).map((p) => {
+  const products: RealtimeProduct[] = allProductsList.map((p) => {
     const pid = Number(p.id);
     const todayQty = todayByProduct.get(pid)?.qty || 0;
     const lastWeekQty = lastWeekByProduct.get(pid) || 0;
-    // const forecast = forecastMap.get(pid);
-    // const fallbackQty = fallbackMap.get(pid) || 0;
-    // const forecastQty =
-    //   forecast && forecast.forecastQty > 0
-    //     ? forecast.forecastQty
-    //     : fallbackQty > 0
-    //       ? fallbackQty
-    //       : 0;
     const forecast = forecastMap.get(pid);
     const forecastQty = forecast?.forecastQty ?? 0;
-
 
     return {
       productId: pid,
@@ -562,13 +451,11 @@ export async function getRealtimeData(
       todayQty,
       lastWeekQty,
       forecastQty,
-      progress:
-        forecastQty > 0 ? Math.round((todayQty / forecastQty) * 100) : 0,
+      progress: forecastQty > 0 ? Math.round((todayQty / forecastQty) * 100) : 0,
       diff: todayQty - lastWeekQty,
     };
   });
 
-  // ─── 마감까지 남은 분 ───
   const [tty, ttm, ttd] = deliveryDate.split("-").map(Number);
   const deadlineDay = new Date(tty, ttm - 1, ttd);
   deadlineDay.setDate(deadlineDay.getDate() - 1);
@@ -580,9 +467,7 @@ export async function getRealtimeData(
     CUTOFF_MINUTE,
     0
   );
-  const minutesUntilCutoff = Math.floor(
-    (deadlineUTC - Date.now()) / (1000 * 60)
-  );
+  const minutesUntilCutoff = Math.floor((deadlineUTC - Date.now()) / (1000 * 60));
 
   return {
     targetDate: deliveryDate,
@@ -593,32 +478,25 @@ export async function getRealtimeData(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 메인 쿼리 #2: getTrendData
+// ★ #8: getTrendData — trial 제외 조건 추가
 // ══════════════════════════════════════════════════════════════════
 
 export async function getTrendData(
   startDate: string,
   endDate: string
 ): Promise<TrendResponse> {
-  const [colorMap, mappingMap] = await Promise.all([
+  const [colorMap, mappingMap, allProductsList] = await Promise.all([
     getProductColorMap(),
     loadProductMappingMap(),
+    getAllProducts(),
   ]);
 
-  const supabase = await createClient();
-  const { data: productRows } = await supabase
-    .from("products")
-    .select("id, product_name")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: true });
-
-  const productList: TrendProduct[] = (productRows || []).map((p, idx) => ({
+  const productList: TrendProduct[] = allProductsList.map((p, idx) => ({
     productId: Number(p.id),
     productName: String(p.product_name),
     color: resolveColor(String(p.product_name), colorMap, idx),
   }));
 
-  // 날짜 목록 생성
   const dates: string[] = [];
   let cursor = startDate;
   while (cursor <= endDate) {
@@ -626,7 +504,6 @@ export async function getTrendData(
     cursor = addDays(cursor, 1);
   }
 
-  // ★ 마감 완료 날짜 vs 미마감 날짜 분리
   const closedDates: string[] = [];
   const pendingDates: string[] = [];
   for (const d of dates) {
@@ -637,12 +514,12 @@ export async function getTrendData(
     }
   }
 
-  // 마감 완료 날짜: 단일 벌크 쿼리
   const dateProductMap = new Map<string, Map<number, number>>();
 
+  // ★ #8: 마감 완료 날짜 벌크 쿼리에 trial 주문 제외
   if (closedDates.length > 0) {
     const bulkRows = (await queryMySQL(
-      `SELECT o.delivery_date,
+      `SELECT DATE_FORMAT(o.delivery_date, '%Y-%m-%d') AS delivery_date,
               CAST(od.product_id AS CHAR) AS external_product_id,
               CAST(SUM(od.quantity) AS SIGNED) AS quantity
        FROM orders o
@@ -650,6 +527,12 @@ export async function getTrendData(
        WHERE o.delivery_date >= ? AND o.delivery_date <= ?
          AND o.delivery_date >= '${DATA_START_DATE}'
          AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+         AND o.id NOT IN (
+           SELECT tso.order_id
+           FROM trial_schedule_orders tso
+           JOIN trial_schedules ts ON ts.id = tso.trial_schedule_id
+           WHERE ts.deleted_at IS NULL AND tso.deleted_at IS NULL
+         )
        GROUP BY o.delivery_date, od.product_id
        ORDER BY o.delivery_date`,
       [closedDates[0], closedDates[closedDates.length - 1]]
@@ -668,7 +551,6 @@ export async function getTrendData(
     }
   }
 
-  // ★ 미마감 날짜: 기존 getOrdersByDate로 개별 처리 (보통 1~2일)
   if (pendingDates.length > 0) {
     const pendingResults = await Promise.all(
       pendingDates.map((d) => getOrdersByDate(d, mappingMap))
@@ -682,7 +564,6 @@ export async function getTrendData(
     });
   }
 
-  // 결과 조립
   const rows: TrendRow[] = dates.map((date) => {
     const byProduct = dateProductMap.get(date) || new Map();
     const row: TrendRow = { date, dayLabel: formatDayLabel(date) };
@@ -700,34 +581,26 @@ export async function getTrendData(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 메인 쿼리 #3: getDrilldownDetailData
+// ★ #3 + #6: getDrilldownDetailData
 // ══════════════════════════════════════════════════════════════════
 
 export async function getDrilldownDetailData(
   targetDate: string
 ): Promise<DrilldownDetailResponse> {
-  // ── 요일 계산 ──
   const [ty, tm, td] = targetDate.split("-").map(Number);
   const targetDateObj = new Date(ty, tm - 1, td);
   const dowIndex = targetDateObj.getDay();
   const dow = DOW_LABELS[dowIndex];
   const dowName = DAY_NAMES[dowIndex];
 
-  // ★ 공통 리소스 병렬 1회 로드
-  const [mappingMap, colorMap, supabase] = await Promise.all([
+  // ★ 공통 리소스 병렬 1회 로드 + #6: getAllProducts 캐시 사용
+  const [mappingMap, colorMap, allProductsList] = await Promise.all([
     loadProductMappingMap(),
     getProductColorMap(),
-    createClient(),
+    getAllProducts(),
   ]);
 
-  // ★ 상품 목록도 여기서 1회 조회 (이전: colorMap 조회 + 별도 조회 = 2회)
-  const { data: productRows } = await supabase
-    .from("products")
-    .select("id, product_name")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: true });
-
-  // ── 금주 & 전주 동일 요일 주문 조회 (매핑맵 재사용) ──
+  // 금주 & 전주 주문 조회
   const lastWeekDate = addDays(targetDate, -7);
   const [thisWeekResult, lastWeekResult] = await Promise.all([
     getOrdersByDate(targetDate, mappingMap),
@@ -740,58 +613,105 @@ export async function getDrilldownDetailData(
   // [1] 요약 카드
   // ──────────────────────────────────────────────────────────
 
-  const accountCountRows = await queryMySQL(
-    `SELECT COUNT(*) AS cnt FROM accounts WHERE status = 'available'`,
-    []
-  );
-  const totalAccounts =
-    Number((accountCountRows as Record<string, unknown>[])[0]?.cnt) || 0;
-
-  const thisWeekByAccount: Record<
-    number,
-    { name: string; qty: number; products: Map<string, number> }
-  > = {};
+  const thisWeekByAccount: Record<number, { name: string; qty: number; products: Map<string, number> }> = {};
   for (const o of thisWeekOrders) {
     if (!thisWeekByAccount[o.accountId]) {
-      thisWeekByAccount[o.accountId] = {
-        name: o.accountName,
-        qty: 0,
-        products: new Map(),
-      };
+      thisWeekByAccount[o.accountId] = { name: o.accountName, qty: 0, products: new Map() };
     }
     thisWeekByAccount[o.accountId].qty += o.quantity;
-    const prev =
-      thisWeekByAccount[o.accountId].products.get(o.productName) || 0;
-    thisWeekByAccount[o.accountId].products.set(
-      o.productName,
-      prev + o.quantity
-    );
+    const prev = thisWeekByAccount[o.accountId].products.get(o.productName) || 0;
+    thisWeekByAccount[o.accountId].products.set(o.productName, prev + o.quantity);
   }
 
-  const lastWeekByAccount: Record<
-    number,
-    { name: string; qty: number; products: Map<string, number> }
-  > = {};
+  const lastWeekByAccount: Record<number, { name: string; qty: number; products: Map<string, number> }> = {};
   for (const o of lastWeekOrders) {
     if (!lastWeekByAccount[o.accountId]) {
-      lastWeekByAccount[o.accountId] = {
-        name: o.accountName,
-        qty: 0,
-        products: new Map(),
-      };
+      lastWeekByAccount[o.accountId] = { name: o.accountName, qty: 0, products: new Map() };
     }
     lastWeekByAccount[o.accountId].qty += o.quantity;
-    const prev =
-      lastWeekByAccount[o.accountId].products.get(o.productName) || 0;
-    lastWeekByAccount[o.accountId].products.set(
-      o.productName,
-      prev + o.quantity
-    );
+    const prev = lastWeekByAccount[o.accountId].products.get(o.productName) || 0;
+    lastWeekByAccount[o.accountId].products.set(o.productName, prev + o.quantity);
   }
 
-  const orderedAccountIds = new Set(
-    Object.keys(thisWeekByAccount).map(Number)
-  );
+  // ★ #3: 관련 account ID만 수집
+  const relevantAccountIds = Array.from(new Set([
+    ...Object.keys(thisWeekByAccount).map(Number),
+    ...Object.keys(lastWeekByAccount).map(Number),
+  ]));
+
+  // ★ #3: accounts 전체 스캔 → 관련 ID만 + 병렬화
+  const mysqlDow = dowIndex + 1;
+
+  let totalAccounts = 0;
+  const accountOrderDaysMap = new Map<number, string[]>();
+  const accountSubscriptionMap = new Map<number, string | null>();
+  const accountStatusMap = new Map<number, string>();
+  const dowCountMap = new Map<number, number>();
+
+  if (relevantAccountIds.length > 0) {
+    const placeholders = relevantAccountIds.map(() => "?").join(",");
+
+    const [accountCountRows, subscriptionRows, dowCountRows] = await Promise.all([
+      // 전체 available 계정 수 (변경 없음 — 이건 전체 카운트 필요)
+      queryMySQL(`SELECT COUNT(*) AS cnt FROM accounts WHERE status = 'available'`, []),
+
+      // ★ 관련 ID만 조회
+      queryMySQL(
+        `SELECT id, order_day, subscription_at, status FROM accounts WHERE id IN (${placeholders})`,
+        relevantAccountIds
+      ),
+
+      // ★ 관련 ID만 + 병렬
+      queryMySQL(
+        `SELECT o.account_id, COUNT(DISTINCT o.delivery_date) AS cnt
+         FROM orders o
+         WHERE o.deleted_at IS NULL
+           AND o.delivery_date <= ?
+           AND DAYOFWEEK(o.delivery_date) = ?
+           AND o.account_id IN (${placeholders})
+         GROUP BY o.account_id`,
+        [targetDate, mysqlDow, ...relevantAccountIds]
+      ),
+    ]) as [Record<string, unknown>[], Record<string, unknown>[], Record<string, unknown>[]];
+
+    totalAccounts = Number(accountCountRows[0]?.cnt) || 0;
+
+    for (const row of subscriptionRows) {
+      const aid = Number(row.id);
+      accountOrderDaysMap.set(aid, parseOrderDay(row.order_day));
+      accountStatusMap.set(aid, String(row.status || "unknown"));
+
+      const subAt = row.subscription_at;
+      if (!subAt) {
+        accountSubscriptionMap.set(aid, null);
+      } else if (subAt instanceof Date) {
+        accountSubscriptionMap.set(aid, toDateStr(subAt));
+      } else {
+        const str = String(subAt);
+        if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+          accountSubscriptionMap.set(aid, str.slice(0, 10));
+        } else {
+          const parsed = new Date(str);
+          if (!isNaN(parsed.getTime())) {
+            accountSubscriptionMap.set(aid, toDateStr(parsed));
+          } else {
+            accountSubscriptionMap.set(aid, null);
+          }
+        }
+      }
+    }
+
+    for (const row of dowCountRows) {
+      dowCountMap.set(Number(row.account_id), Number(row.cnt) || 0);
+    }
+  } else {
+    const accountCountRows = (await queryMySQL(
+      `SELECT COUNT(*) AS cnt FROM accounts WHERE status = 'available'`, []
+    )) as Record<string, unknown>[];
+    totalAccounts = Number(accountCountRows[0]?.cnt) || 0;
+  }
+
+  const orderedAccountIds = new Set(Object.keys(thisWeekByAccount).map(Number));
   const orderedCount = orderedAccountIds.size;
   const unorderedCount = totalAccounts - orderedCount;
 
@@ -801,24 +721,17 @@ export async function getDrilldownDetailData(
   }
 
   // ──────────────────────────────────────────────────────────
-  // [2] 상품별 배지
+  // [2] 상품별 배지 — ★ #6: getAllProducts 캐시 사용
   // ──────────────────────────────────────────────────────────
 
-  const productQtyMap = new Map<
-    number,
-    { productName: string; qty: number }
-  >();
+  const productQtyMap = new Map<number, { productName: string; qty: number }>();
   for (const o of thisWeekOrders) {
     const existing = productQtyMap.get(o.productId);
     if (existing) existing.qty += o.quantity;
-    else
-      productQtyMap.set(o.productId, {
-        productName: o.productName,
-        qty: o.quantity,
-      });
+    else productQtyMap.set(o.productId, { productName: o.productName, qty: o.quantity });
   }
 
-  const productChips: ProductChip[] = (productRows || [])
+  const productChips: ProductChip[] = allProductsList
     .map((p, idx) => {
       const pid = Number(p.id);
       const info = productQtyMap.get(pid);
@@ -835,59 +748,8 @@ export async function getDrilldownDetailData(
   // [3] 요일 기준 특이 고객사
   // ──────────────────────────────────────────────────────────
 
-  const subscriptionRows = await queryMySQL(
-    `SELECT id, order_day, subscription_at, status FROM accounts`,
-    []
-  );
-
-  const accountOrderDaysMap = new Map<number, string[]>();
-  const accountSubscriptionMap = new Map<number, string | null>();
-  const accountStatusMap = new Map<number, string>();
-  for (const row of subscriptionRows as Record<string, unknown>[]) {
-    const aid = Number(row.id);
-    accountOrderDaysMap.set(aid, parseOrderDay(row.order_day));
-    accountStatusMap.set(aid, String(row.status || "unknown"));
-
-    const subAt = row.subscription_at;
-    if (!subAt) {
-      accountSubscriptionMap.set(aid, null);
-    } else if (subAt instanceof Date) {
-      accountSubscriptionMap.set(aid, toDateStr(subAt));
-    } else {
-      const str = String(subAt);
-      if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
-        accountSubscriptionMap.set(aid, str.slice(0, 10));
-      } else {
-        const parsed = new Date(str);
-        if (!isNaN(parsed.getTime())) {
-          accountSubscriptionMap.set(aid, toDateStr(parsed));
-        } else {
-          accountSubscriptionMap.set(aid, null);
-        }
-      }
-    }
-  }
-
-  const mysqlDow = dowIndex + 1;
-  const dowCountRows = await queryMySQL(
-    `SELECT o.account_id, COUNT(DISTINCT o.delivery_date) AS cnt
-     FROM orders o
-     JOIN accounts a ON a.id = o.account_id
-     WHERE o.deleted_at IS NULL
-       AND o.delivery_date <= ?
-       AND DAYOFWEEK(o.delivery_date) = ?
-       AND (a.subscription_at IS NULL OR o.delivery_date >= a.subscription_at)
-     GROUP BY o.account_id`,
-    [targetDate, mysqlDow]
-  );
-  const dowCountMap = new Map<number, number>();
-  for (const row of dowCountRows as Record<string, unknown>[]) {
-    dowCountMap.set(Number(row.account_id), Number(row.cnt) || 0);
-  }
-
   const weekdayClients: WeekdayCaseClient[] = [];
 
-  // 이탈(lapsed): 전주 O → 금주 X
   for (const [aid, info] of Object.entries(lastWeekByAccount)) {
     const accountId = Number(aid);
     if (!thisWeekByAccount[accountId]) {
@@ -902,14 +764,11 @@ export async function getDrilldownDetailData(
         thisWeekQty: 0,
         diff: -info.qty,
         changeRate: -100,
-        products: Array.from(info.products.entries()).map(
-          ([name, qty]) => ({ productName: name, qty })
-        ),
+        products: Array.from(info.products.entries()).map(([name, qty]) => ({ productName: name, qty })),
       });
     }
   }
 
-  // 신규(new): 전주 X → 금주 O
   for (const [aid, info] of Object.entries(thisWeekByAccount)) {
     const accountId = Number(aid);
     if (!lastWeekByAccount[accountId]) {
@@ -924,14 +783,11 @@ export async function getDrilldownDetailData(
         thisWeekQty: info.qty,
         diff: info.qty,
         changeRate: null,
-        products: Array.from(info.products.entries()).map(
-          ([name, qty]) => ({ productName: name, qty })
-        ),
+        products: Array.from(info.products.entries()).map(([name, qty]) => ({ productName: name, qty })),
       });
     }
   }
 
-  // 미지정(unassigned)
   for (const [aid, info] of Object.entries(thisWeekByAccount)) {
     const accountId = Number(aid);
     if (weekdayClients.some((c) => c.accountId === accountId)) continue;
@@ -952,39 +808,28 @@ export async function getDrilldownDetailData(
       lastWeekQty: lastQty,
       thisWeekQty: info.qty,
       diff,
-      changeRate:
-        lastQty > 0 ? Math.round((diff / lastQty) * 100) : null,
-      products: Array.from(info.products.entries()).map(
-        ([name, qty]) => ({ productName: name, qty })
-      ),
+      changeRate: lastQty > 0 ? Math.round((diff / lastQty) * 100) : null,
+      products: Array.from(info.products.entries()).map(([name, qty]) => ({ productName: name, qty })),
     });
   }
 
-  const lapsedCount = weekdayClients.filter(
-    (c) => c.case === "lapsed"
-  ).length;
+  const lapsedCount = weekdayClients.filter((c) => c.case === "lapsed").length;
   const newCount = weekdayClients.filter((c) => c.case === "new").length;
 
   const weekdaySummary: WeekdayCaseSummary = {
     lapsed: lapsedCount,
     new: newCount,
-    unassigned: weekdayClients.filter((c) => c.case === "unassigned")
-      .length,
+    unassigned: weekdayClients.filter((c) => c.case === "unassigned").length,
     total: weekdayClients.length,
   };
 
   // ──────────────────────────────────────────────────────────
-  // [4] 수량 기준 특이 고객사 (±3 이상 변동)
+  // [4] 수량 기준 특이 고객사
   // ──────────────────────────────────────────────────────────
 
   const quantityClients: QuantityAnomalyClient[] = [];
 
-  const allAccountIds = new Set([
-    ...Object.keys(thisWeekByAccount).map(Number),
-    ...Object.keys(lastWeekByAccount).map(Number),
-  ]);
-
-  for (const accountId of allAccountIds) {
+  for (const accountId of relevantAccountIds) {
     const tw = thisWeekByAccount[accountId];
     const lw = lastWeekByAccount[accountId];
     if (!tw && !lw) continue;
@@ -996,35 +841,24 @@ export async function getDrilldownDetailData(
     if (Math.abs(diff) >= QTY_ANOMALY_THRESHOLD) {
       const twProducts = tw?.products || new Map<string, number>();
       const lwProducts = lw?.products || new Map<string, number>();
-      const allProductNames = new Set([
-        ...twProducts.keys(),
-        ...lwProducts.keys(),
-      ]);
+      const allProductNames = new Set([...twProducts.keys(), ...lwProducts.keys()]);
 
       quantityClients.push({
         accountId,
         accountName: tw?.name || lw?.name || "",
         accountStatus: accountStatusMap.get(accountId) ?? "unknown",
-        subscriptionAt:
-          accountSubscriptionMap.get(accountId) ?? null,
+        subscriptionAt: accountSubscriptionMap.get(accountId) ?? null,
         dowOrderCount: dowCountMap.get(accountId) ?? 0,
         lastWeekQty: lastQty,
         thisWeekQty: thisQty,
         diff,
-        changeRate:
-          lastQty > 0
-            ? Math.round((diff / lastQty) * 100)
-            : thisQty > 0
-              ? 100
-              : 0,
+        changeRate: lastQty > 0 ? Math.round((diff / lastQty) * 100) : thisQty > 0 ? 100 : 0,
         direction: diff > 0 ? "up" : "down",
         products: Array.from(allProductNames).map((pName) => ({
           productName: pName,
           thisWeek: twProducts.get(pName) || 0,
           lastWeek: lwProducts.get(pName) || 0,
-          diff:
-            (twProducts.get(pName) || 0) -
-            (lwProducts.get(pName) || 0),
+          diff: (twProducts.get(pName) || 0) - (lwProducts.get(pName) || 0),
         })),
       });
     }

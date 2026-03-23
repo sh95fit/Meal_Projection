@@ -1,7 +1,7 @@
-// app/(main)/dashboard/_components/TrendChartSection.tsx (전체 교체)
+// app/(main)/dashboard/_components/TrendChartSection.tsx
 "use client";
 
-import { ReactElement } from "react";
+import { ReactElement, useMemo } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +13,6 @@ import type { TrendResponse, TrendRow, PeriodPreset } from "@/types/dashboard";
 
 import { Loader2 } from "lucide-react";
 
-// ─── Props ───
 interface Props {
   data: TrendResponse | null;
   onBarClick?: (date: string) => void;
@@ -25,10 +24,9 @@ interface Props {
   onPresetChange: (p: PeriodPreset) => void;
   onCustomRangeChange: (start: string, end: string) => void;
   onToggleProduct: (name: string) => void;
-  loading?: boolean; 
+  loading?: boolean;
 }
 
-// ─── 프리셋 옵션 ───
 const TREND_PRESETS: { label: string; value: PeriodPreset }[] = [
   { label: "올해",     value: "year" },
   { label: "7일",      value: "7d" },
@@ -38,12 +36,10 @@ const TREND_PRESETS: { label: string; value: PeriodPreset }[] = [
   { label: "기간 지정", value: "custom" },
 ];
 
-// ─── 활성 날짜 하이라이트용 shape 함수 ───
 function makeHighlightShape(activeDate: string | null | undefined) {
   return function HighlightBar(props: BarShapeProps) {
     const payload = (props as BarShapeProps & { payload?: TrendRow }).payload;
     const isActive = activeDate && payload?.date === activeDate;
-
     return (
       <Rectangle
         {...props}
@@ -55,16 +51,13 @@ function makeHighlightShape(activeDate: string | null | undefined) {
   };
 }
 
-// ─── 합계 라벨 (스택 맨 위 Bar 상단에 표시) ───
 function TotalLabel(props: LabelProps): ReactElement | null {
   const { viewBox, value } = props;
   const numVal = typeof value === "number" ? value : Number(value);
   if (!numVal || numVal === 0) return null;
-
   const vb = viewBox as { x?: number; y?: number; width?: number } | undefined;
   const x = (vb?.x ?? 0) + (vb?.width ?? 0) / 2;
   const y = (vb?.y ?? 0) - 8;
-
   return (
     <text x={x} y={y} textAnchor="middle" fontSize={10} fontWeight={700} fill="#374151">
       {numVal.toLocaleString()}
@@ -72,21 +65,17 @@ function TotalLabel(props: LabelProps): ReactElement | null {
   );
 }
 
-// ─── 개별 상품 수량 라벨 ───
 function ProductValueLabel(props: LabelProps): ReactElement | null {
   const { value, viewBox } = props;
   const numVal = typeof value === "number" ? value : Number(value);
   if (!numVal || numVal === 0) return null;
-
   const vb = viewBox as { x?: number; y?: number; width?: number; height?: number } | undefined;
   const h = vb?.height ?? 0;
   const w = vb?.width ?? 0;
   const textLen = numVal.toLocaleString().length * 6;
   if (h < 16 || w < textLen + 4) return null;
-
   const x = (vb?.x ?? 0) + w / 2;
   const y = (vb?.y ?? 0) + h / 2 + 4;
-
   return (
     <text x={x} y={y} textAnchor="middle" fontSize={9} fill="#fff">
       {numVal.toLocaleString()}
@@ -100,7 +89,32 @@ export function TrendChartSection({
   onPresetChange, onCustomRangeChange, onToggleProduct,
   loading,
 }: Props) {
-  if (!data || data.rows.length === 0) {
+  // ★ #7: useMemo로 filteredRows + visibleProducts 메모이제이션
+  const visibleProducts = useMemo(() => {
+    if (!data) return [];
+    return data.productList.filter((p) => !excludedProducts.has(p.productName));
+  }, [data, excludedProducts]);
+
+  const filteredRows = useMemo(() => {
+    if (!data || data.rows.length === 0) return [];
+    return data.rows.map((row) => {
+      const newRow: TrendRow = { date: row.date, dayLabel: row.dayLabel, _total: 0 };
+      let total = 0;
+      for (const p of data.productList) {
+        if (excludedProducts.has(p.productName)) {
+          newRow[p.productName] = 0;
+        } else {
+          const val = Number(row[p.productName] || 0);
+          newRow[p.productName] = val;
+          total += val;
+        }
+      }
+      newRow._total = total;
+      return newRow;
+    });
+  }, [data, excludedProducts]);
+
+  if (!data || filteredRows.length === 0) {
     return (
       <Card>
         <CardHeader><CardTitle className="text-lg">과거 주문 이력</CardTitle></CardHeader>
@@ -110,27 +124,6 @@ export function TrendChartSection({
       </Card>
     );
   }
-
-  const visibleProducts = data.productList.filter(
-    (p) => !excludedProducts.has(p.productName)
-  );
-
-  // ★ 모든 상품 키를 명시적으로 설정 (제외 상품 = 0)
-  const filteredRows: TrendRow[] = data.rows.map((row) => {
-    const newRow: TrendRow = { date: row.date, dayLabel: row.dayLabel, _total: 0 };
-    let total = 0;
-    for (const p of data.productList) {
-      if (excludedProducts.has(p.productName)) {
-        newRow[p.productName] = 0;
-      } else {
-        const val = Number(row[p.productName] || 0);
-        newRow[p.productName] = val;
-        total += val;
-      }
-    }
-    newRow._total = total;
-    return newRow;
-  });
 
   const handleBarClick = (
     barData: BarRectangleItem,
@@ -145,8 +138,6 @@ export function TrendChartSection({
   const showProductLabels = visibleProducts.length > 1;
   const highlightShape = makeHighlightShape(activeDate);
   const lastProductIndex = visibleProducts.length - 1;
-
-  // ★ 필터 변경 시 차트 강제 리렌더링용 key
   const chartKey = visibleProducts.map((p) => p.productId).join("-");
 
   return (
@@ -162,7 +153,6 @@ export function TrendChartSection({
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        {/* ── 기간 필터 ── */}
         <div className="flex items-center gap-2 flex-wrap">
           {TREND_PRESETS.map((opt) => (
             <Button
@@ -174,7 +164,6 @@ export function TrendChartSection({
               {opt.label}
             </Button>
           ))}
-
           {preset === "custom" && (
             <div className="flex items-center gap-1 ml-2">
               <input
@@ -194,7 +183,6 @@ export function TrendChartSection({
           )}
         </div>
 
-        {/* ── 상품 필터 (포함/제외) ── */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground font-medium">상품:</span>
           {data.productList.map((p) => {
@@ -221,7 +209,6 @@ export function TrendChartSection({
           })}
         </div>
 
-        {/* ── 차트 ── */}
         <div className="relative">
           {loading && (
             <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20 rounded-md">
@@ -229,53 +216,46 @@ export function TrendChartSection({
               <span className="ml-2 text-sm text-muted-foreground">불러오는 중…</span>
             </div>
           )}
-            <ResponsiveContainer width="100%" height={400}>
-              <BarChart
-                key={chartKey}
-                data={filteredRows}
-                margin={{ top: 25, right: 10, left: 10, bottom: 0 }}
-                style={{ cursor: onBarClick ? "pointer" : "default" }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{ fontSize: 12 }}
-                  labelStyle={{ fontSize: 12, fontWeight: 600 }}
-                  itemStyle={{ fontSize: 11, padding: "1px 0" }}
-                  formatter={(value) => {
-                    if (Array.isArray(value)) return value.join(", ");
-                    return value != null ? Number(value).toLocaleString() : "0";
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11 }} iconSize={10} />
-                {visibleProducts.map((product, idx) => (
-                  <Bar
-                    key={product.productId}
-                    dataKey={product.productName}
-                    stackId="stack"
-                    fill={product.color}
-                    name={product.productName}
-                    onClick={handleBarClick}
-                    shape={highlightShape}
-                  >
-                    {showProductLabels && (
-                      <LabelList
-                        dataKey={product.productName}
-                        content={ProductValueLabel}
-                      />
-                    )}
-                    {idx === lastProductIndex && (
-                      <LabelList
-                        dataKey="_total"
-                        position="top"
-                        content={TotalLabel}
-                      />
-                    )}
-                  </Bar>
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
+          <ResponsiveContainer width="100%" height={400}>
+            <BarChart
+              key={chartKey}
+              data={filteredRows}
+              margin={{ top: 25, right: 10, left: 10, bottom: 0 }}
+              style={{ cursor: onBarClick ? "pointer" : "default" }}
+            >
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ fontSize: 12 }}
+                labelStyle={{ fontSize: 12, fontWeight: 600 }}
+                itemStyle={{ fontSize: 11, padding: "1px 0" }}
+                formatter={(value) => {
+                  if (Array.isArray(value)) return value.join(", ");
+                  return value != null ? Number(value).toLocaleString() : "0";
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} iconSize={10} />
+              {visibleProducts.map((product, idx) => (
+                <Bar
+                  key={product.productId}
+                  dataKey={product.productName}
+                  stackId="stack"
+                  fill={product.color}
+                  name={product.productName}
+                  onClick={handleBarClick}
+                  shape={highlightShape}
+                >
+                  {showProductLabels && (
+                    <LabelList dataKey={product.productName} content={ProductValueLabel} />
+                  )}
+                  {idx === lastProductIndex && (
+                    <LabelList dataKey="_total" position="top" content={TotalLabel} />
+                  )}
+                </Bar>
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </CardContent>
     </Card>
