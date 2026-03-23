@@ -58,6 +58,9 @@ export function useDashboard() {
   const realtimeDateRef = useRef(realtimeDate);
   realtimeDateRef.current = realtimeDate;
 
+  // ★ 실시간 fetch의 요청 ID — 마지막 요청만 반영
+  const realtimeRequestIdRef = useRef(0);
+
   const trendStateRef = useRef({
     preset: trendPreset,
     customStart: trendCustomStart,
@@ -87,18 +90,30 @@ export function useDashboard() {
   const lastTrendQueryRef = useRef<string>("");
   const lastClientQueryRef = useRef<string>("");
 
+  // ★ 실시간 날짜 변경 debounce 타이머
+  const realtimeDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
   // ─── Fetch 함수들 (모두 deps=[] → 참조 안정) ───
 
   const fetchRealtime = useCallback(async (date?: string) => {
     const targetDate = date || realtimeDateRef.current;
+    const requestId = ++realtimeRequestIdRef.current; // ★ 요청 ID 발급
+
     try {
       setRealtimeLoading(true);
       const data = await apiGet<RealtimeResponse>(`/api/dashboard/realtime?date=${targetDate}`);
+
+      // ★ 응답 도착 시점에 최신 요청인지 확인 — 아니면 무시
+      if (requestId !== realtimeRequestIdRef.current) return;
+
       setRealtime(data);
     } catch (err) {
+      if (requestId !== realtimeRequestIdRef.current) return;
       console.error("[Dashboard] realtime fetch error:", err);
     } finally {
-      setRealtimeLoading(false);
+      if (requestId === realtimeRequestIdRef.current) {
+        setRealtimeLoading(false);
+      }
     }
   }, []);
 
@@ -290,11 +305,28 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── 실시간 날짜 변경 시 재조회 ───
+  // ─── ★ 실시간 날짜 변경 시 debounce + 이전 응답 무시 ───
   useEffect(() => {
-    if (initializedRef.current) {
-      fetchRealtime(realtimeDate);
+    if (!initializedRef.current) return;
+
+    // 이전 debounce 타이머 취소
+    if (realtimeDebounceRef.current) {
+      clearTimeout(realtimeDebounceRef.current);
     }
+
+    // ★ 즉시 로딩 표시 (날짜 변경 시 바로 로딩 UI로 전환)
+    setRealtimeLoading(true);
+
+    // ★ 300ms debounce — 빠르게 여러 번 변경해도 마지막 것만 fetch
+    realtimeDebounceRef.current = setTimeout(() => {
+      fetchRealtime(realtimeDate);
+    }, 300);
+
+    return () => {
+      if (realtimeDebounceRef.current) {
+        clearTimeout(realtimeDebounceRef.current);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeDate]);
 
