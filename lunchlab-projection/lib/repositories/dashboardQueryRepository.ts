@@ -110,8 +110,18 @@ async function loadProductMappingMap(): Promise<ProductMappingMap> {
 // needsAppMenuMerge
 // ══════════════════════════════════════════════════════════════════
 
+const mergeCheckCache = new Map<string, { result: boolean; ts: number }>();
+
 function needsAppMenuMerge(dateStr: string): boolean {
-  const now = new Date();
+  const now = Date.now();
+
+  // 캐시 확인 (60초 TTL)
+  const entry = mergeCheckCache.get(dateStr);
+  if (entry && now - entry.ts < 60_000) {
+    return entry.result;
+  }
+
+  const nowDate = new Date();
   const [y, m, d] = dateStr.split("-").map(Number);
   const deliveryDate = new Date(y, m - 1, d);
 
@@ -140,7 +150,17 @@ function needsAppMenuMerge(dateStr: string): boolean {
     0
   );
 
-  return now.getTime() < deadlineUTC;
+  const result = nowDate.getTime() < deadlineUTC;
+  mergeCheckCache.set(dateStr, { result, ts: now });
+
+  // 100개 초과 시 오래된 항목 정리
+  if (mergeCheckCache.size > 100) {
+    for (const [key, val] of mergeCheckCache) {
+      if (now - val.ts > 60_000) mergeCheckCache.delete(key);
+    }
+  }
+
+  return result;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -362,22 +382,23 @@ async function mergeOrders(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// getOrdersByDate (진입점)
+// getOrdersByDate (진입점)  — web/app 쿼리 병렬화
 // ══════════════════════════════════════════════════════════════════
 
 export async function getOrdersByDate(
   dateStr: string,
   mappingMap?: ProductMappingMap
 ): Promise<OrdersByDateResult> {
-  const webOrders = await getWebOrdersByDate(dateStr);
-  if (needsAppMenuMerge(dateStr)) {
-    const appOrders = await getAppOrdersByDate(dateStr);
-    const orders = await mergeOrders(webOrders, appOrders, mappingMap);
-    return { orders, appOrdersMerged: true };
-  } else {
-    const orders = await mergeOrders(webOrders, [], mappingMap);
-    return { orders, appOrdersMerged: false };
-  }
+  const shouldMergeApp = needsAppMenuMerge(dateStr);
+
+  // ★ A-2: 독립적인 web과 app 쿼리를 동시에 실행
+  const [webOrders, appOrders] = await Promise.all([
+    getWebOrdersByDate(dateStr),
+    shouldMergeApp ? getAppOrdersByDate(dateStr) : Promise.resolve([]),
+  ]);
+
+  const orders = await mergeOrders(webOrders, appOrders, mappingMap);
+  return { orders, appOrdersMerged: shouldMergeApp };
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -788,9 +809,11 @@ export async function getDrilldownDetailData(
     }
   }
 
+  const weekdayClientIds = new Set(weekdayClients.map((c) => c.accountId));
+
   for (const [aid, info] of Object.entries(thisWeekByAccount)) {
     const accountId = Number(aid);
-    if (weekdayClients.some((c) => c.accountId === accountId)) continue;
+    if (weekdayClientIds.has(accountId)) continue;  // ★ O(1)
     const orderDays = accountOrderDaysMap.get(accountId) || [];
     if (orderDays.includes(dowName)) continue;
 

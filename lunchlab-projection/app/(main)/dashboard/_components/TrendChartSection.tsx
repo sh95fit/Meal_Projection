@@ -136,9 +136,12 @@ export function TrendChartSection({
   };
 
   const showProductLabels = visibleProducts.length > 1;
-  const highlightShape = makeHighlightShape(activeDate);
+  const highlightShape = useMemo(() => makeHighlightShape(activeDate), [activeDate]);
   const lastProductIndex = visibleProducts.length - 1;
-  const chartKey = visibleProducts.map((p) => p.productId).join("-");
+  const chartKey = useMemo(
+    () => visibleProducts.map((p) => p.productId).join("-"),
+    [visibleProducts]
+  );
 
   return (
     <Card>

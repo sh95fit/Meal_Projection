@@ -13,8 +13,12 @@
 // - getClientModalData: 30영업일 추이 벌크 쿼리화 (30회 → 1회)
 //
 // [최적화 변경사항]
-// #1: getClientModalData 내부 4개 MySQL + 1개 Supabase 쿼리 병렬화
+// #1: getClientModalData 내부 쿼리 병렬화
 // #5: lastOrderDate 선형탐색 → 1회 순회 Map 구축
+// A-1: Supabase 이중 호출 제거 → getAllProducts + getProductColorMap 캐시 활용
+// B-1: getClientModalData 결과 서버 캐시 (2분 TTL)
+// A-3: 이전 기간 3개 COUNT → 단일 CASE WHEN 쿼리
+// A-4: 현재 기간 + 이전 기간 쿼리를 1회 Promise.all로 완전 병렬화
 // ──────────────────────────────────────────────────────────────────
 
 import { queryMySQL } from "@/lib/mysql/client";
@@ -28,6 +32,7 @@ import {
   DAY_NAMES,
   DOW_LABELS,
 } from "@/lib/constants/dashboard";
+import { cached } from "@/lib/cache";
 import type {
   ClientModalData,
   MergedOrder,
@@ -50,22 +55,38 @@ interface AccountOrderStats {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 고객사 상세 모달 데이터 조회
+// ★ B-1: 고객사 상세 모달 데이터 조회 — 서버 캐시 래핑 (2분)
 // ══════════════════════════════════════════════════════════════════
 
 export async function getClientModalData(
   accountId: number,
   clientType: string = "churned"
 ): Promise<ClientModalData> {
+  return cached(
+    `clientModal:${accountId}:${clientType}`,
+    2 * 60 * 1000,
+    () => _getClientModalDataImpl(accountId, clientType)
+  );
+}
+
+async function _getClientModalDataImpl(
+  accountId: number,
+  clientType: string
+): Promise<ClientModalData> {
   // ═══════════════════════════════════════
-  // ★ 1)~6) 독립 쿼리 5개를 전부 병렬 실행
+  // ★ A-1: getAllProducts + getProductColorMap 캐시 활용
+  //   기존: createClient() → supabase.from("products") 직접 호출
+  //   개선: 이미 캐시된 getAllProducts()로 제품 목록 확보,
+  //         매핑 정보만 별도 Supabase 1회 조회
   // ═══════════════════════════════════════
   const [
     accountRows,
     dateRows,
     allDailyRows,
     allProductDailyRows,
-    { colorMap, products },
+    allProducts,
+    colorMap,
+    mappingRows,
   ] = await Promise.all([
     // 1) 계정 정보
     queryMySQL(
@@ -84,7 +105,7 @@ export async function getClientModalData(
       [accountId]
     ) as Promise<Record<string, unknown>[]>,
 
-    // 4) 전체 기간 일별 수량
+    // 3) 전체 기간 일별 수량
     queryMySQL(
       `SELECT o.delivery_date,
               CAST(SUM(od.quantity) AS SIGNED) AS day_qty
@@ -97,7 +118,7 @@ export async function getClientModalData(
       [accountId]
     ) as Promise<Record<string, unknown>[]>,
 
-    // 5) 전체 기간 상품별 일별 수량
+    // 4) 전체 기간 상품별 일별 수량
     queryMySQL(
       `SELECT o.delivery_date,
               od.product_id,
@@ -111,18 +132,19 @@ export async function getClientModalData(
       [accountId]
     ) as Promise<Record<string, unknown>[]>,
 
-    // 6) 상품 목록 + 색상 (Supabase 2개 병렬)
+    // ★ A-1: 캐시된 제품 목록 (Supabase 직접 호출 없이)
+    getAllProducts(),
+
+    // ★ A-1: 캐시된 색상 맵
+    getProductColorMap(),
+
+    // 매핑 정보만 Supabase에서 조회 (제품 목록 자체는 캐시 활용)
     (async () => {
-      const [colorMap, supabase] = await Promise.all([
-        getProductColorMap(),
-        createClient(),
-      ]);
-      const { data: products } = await supabase
-        .from("products")
-        .select("id, product_name, product_id_mappings(channel, external_id)")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: true });
-      return { colorMap, products: products || [] };
+      const supabase = await createClient();
+      const { data } = await supabase
+        .from("product_id_mappings")
+        .select("product_id, channel, external_id");
+      return data || [];
     })(),
   ]);
 
@@ -178,9 +200,27 @@ export async function getClientModalData(
   const medianQty = median(allQtyList);
 
   // ═══════════════════════════════════════
-  // 6) 상품 목록 + 매핑
+  // 5) ★ A-1: 상품 목록 + 매핑 구축 (캐시 활용)
   // ═══════════════════════════════════════
-  const productList = products.map((p, idx) => {
+
+  // product_id → product_name 맵 (Supabase products 캐시에서)
+  const productIdToName = new Map<number, string>();
+  for (const p of allProducts) {
+    productIdToName.set(Number(p.id), String(p.product_name));
+  }
+
+  // extId(web) → productName 맵 (매핑 테이블에서)
+  const extIdToName = new Map<string, string>();
+  for (const m of mappingRows) {
+    if ((m as Record<string, unknown>).channel === "web") {
+      const pName = productIdToName.get(Number((m as Record<string, unknown>).product_id));
+      if (pName) {
+        extIdToName.set(String((m as Record<string, unknown>).external_id), pName);
+      }
+    }
+  }
+
+  const productList = allProducts.map((p, idx) => {
     const name = String(p.product_name);
     return {
       productName: name,
@@ -189,22 +229,8 @@ export async function getClientModalData(
     };
   });
 
-  const extIdToName = new Map<string, string>();
-  for (const p of products) {
-    const raw = p as Record<string, unknown>;
-    const mappings = (raw.product_id_mappings || []) as {
-      channel: string;
-      external_id: string;
-    }[];
-    for (const m of mappings) {
-      if (m.channel === "web") {
-        extIdToName.set(String(m.external_id), String(raw.product_name));
-      }
-    }
-  }
-
   // ═══════════════════════════════════════
-  // 7) 상품별 평균 / 중간값
+  // 6) 상품별 평균 / 중간값
   // ═══════════════════════════════════════
   const productDailyMap = new Map<string, number[]>();
   for (const row of allProductDailyRows) {
@@ -229,7 +255,7 @@ export async function getClientModalData(
   });
 
   // ═══════════════════════════════════════
-  // 8) 최근 30영업일 추이 데이터 — 벌크 쿼리
+  // 7) 최근 30영업일 추이 데이터 — 벌크 쿼리
   // ═══════════════════════════════════════
   const today = getToday();
   const allDates: string[] = [];
@@ -292,7 +318,7 @@ export async function getClientModalData(
   }
 
   // ═══════════════════════════════════════
-  // 9) 고객사명
+  // 8) 고객사명
   // ═══════════════════════════════════════
   const accountName = dbAccountName || `고객사 #${accountId}`;
 
@@ -327,9 +353,9 @@ export async function getClientChangeData(
   prevEndDate: string
 ): Promise<ClientChangeResponse> {
   // ═══════════════════════════════════════
-  // 1) 현재 기간 이탈/신규/전환예정 — 3개 병렬
+  // ★ A-4: 현재 기간 3쿼리 + A-3: 이전 기간 통합 1쿼리 → 총 4쿼리 1회 Promise.all
   // ═══════════════════════════════════════
-  const [churnedRows, newRows, convertedRows] = (await Promise.all([
+  const [churnedRows, newRows, convertedRows, prevCountRows] = (await Promise.all([
     queryMySQL(
       `SELECT a.id, a.name, a.status, a.terminate_at,
               a.subscription_at, a.order_day
@@ -358,33 +384,29 @@ export async function getClientChangeData(
          AND a.subscription_scheduled_at <= ?`,
       [startDate, endDate]
     ),
-  ])) as [Record<string, unknown>[], Record<string, unknown>[], Record<string, unknown>[]];
+    // ★ A-3: 이전 기간 3개 COUNT → 단일 CASE WHEN
+    queryMySQL(
+      `SELECT
+         SUM(CASE WHEN status = 'disabled'
+                   AND subscription_at IS NOT NULL
+                   AND terminate_at IS NOT NULL
+                   AND terminate_at >= ? AND terminate_at <= ?
+              THEN 1 ELSE 0 END) AS prev_churned,
+         SUM(CASE WHEN status = 'available'
+                   AND subscription_at >= ? AND subscription_at <= ?
+              THEN 1 ELSE 0 END) AS prev_new,
+         SUM(CASE WHEN status = 'scheduled'
+                   AND subscription_scheduled_at >= ? AND subscription_scheduled_at <= ?
+              THEN 1 ELSE 0 END) AS prev_converted
+       FROM accounts
+       WHERE status IN ('disabled', 'available', 'scheduled')`,
+      [prevStartDate, prevEndDate, prevStartDate, prevEndDate, prevStartDate, prevEndDate]
+    ),
+  ])) as [Record<string, unknown>[], Record<string, unknown>[], Record<string, unknown>[], Record<string, unknown>[]];
 
-  // ═══════════════════════════════════════
-  // 2) 이전 기간 카운트 — 3개 병렬
-  // ═══════════════════════════════════════
-  const [prevChurnedRows, prevNewRows, prevConvertedRows] = (await Promise.all([
-    queryMySQL(
-      `SELECT COUNT(*) AS cnt FROM accounts
-       WHERE status = 'disabled'
-         AND subscription_at IS NOT NULL
-         AND terminate_at IS NOT NULL
-         AND terminate_at >= ? AND terminate_at <= ?`,
-      [prevStartDate, prevEndDate]
-    ),
-    queryMySQL(
-      `SELECT COUNT(*) AS cnt FROM accounts
-       WHERE status = 'available'
-         AND subscription_at >= ? AND subscription_at <= ?`,
-      [prevStartDate, prevEndDate]
-    ),
-    queryMySQL(
-      `SELECT COUNT(*) AS cnt FROM accounts
-       WHERE status = 'scheduled'
-         AND subscription_scheduled_at >= ? AND subscription_scheduled_at <= ?`,
-      [prevStartDate, prevEndDate]
-    ),
-  ])) as [Record<string, unknown>[], Record<string, unknown>[], Record<string, unknown>[]];
+  const prevChurnedCount = Number(prevCountRows[0]?.prev_churned ?? 0);
+  const prevNewCount = Number(prevCountRows[0]?.prev_new ?? 0);
+  const prevConvertedCount = Number(prevCountRows[0]?.prev_converted ?? 0);
 
   // ═══════════════════════════════════════
   // 3) 각 고객사의 주문 통계 (중간값 포함)
@@ -429,7 +451,7 @@ export async function getClientChangeData(
       ),
     ])) as [Record<string, unknown>[], Record<string, unknown>[]];
 
-    // ★ #5 개선: lastOrderDate를 1회 순회 Map으로 수집
+    // ★ #5: lastOrderDate를 1회 순회 Map으로 수집
     const dailyByAccount = new Map<number, number[]>();
     const lastOrderDateMap = new Map<number, string>();
 
@@ -443,7 +465,6 @@ export async function getClientChangeData(
         dailyByAccount.get(aid)!.push(qty);
       }
 
-      // lastOrderDate: 가장 큰 날짜만 보관
       const existing = lastOrderDateMap.get(aid);
       if (!existing || dateStr > existing) {
         lastOrderDateMap.set(aid, dateStr);
@@ -715,10 +736,6 @@ export async function getClientChangeData(
   const churnedCount = churnedRows.length;
   const newCount = newRows.length;
   const convertedCount = convertedRows.length;
-
-  const prevChurnedCount = Number(prevChurnedRows[0]?.cnt ?? 0);
-  const prevNewCount = Number(prevNewRows[0]?.cnt ?? 0);
-  const prevConvertedCount = Number(prevConvertedRows[0]?.cnt ?? 0);
 
   return {
     startDate,

@@ -20,8 +20,10 @@ export function useDashboard() {
   // ─── 캐시 ───
   const trendCacheRef = useRef<Map<string, TrendResponse>>(new Map());
   const clientsCacheRef = useRef<Map<string, ClientChangeResponse>>(new Map());
-  // ★ #4: 드릴다운 캐시
+  // 드릴다운 캐시
   const drilldownCacheRef = useRef<Map<string, DrilldownDetailResponse>>(new Map());
+  // 고객사 모달 데이터 프론트 캐시
+  const clientModalCacheRef = useRef<Map<string, ClientModalData>>(new Map());
 
   // ─── 실시간 섹션 ───
   const [realtimeDate, setRealtimeDateState] = useState<string>(() => getDefaultRealtimeDate());
@@ -207,6 +209,7 @@ export function useDashboard() {
     trendCacheRef.current.clear();
     clientsCacheRef.current.clear();
     drilldownCacheRef.current.clear();
+    clientModalCacheRef.current.clear();  
     lastTrendQueryRef.current = "";
     lastClientQueryRef.current = "";
 
@@ -259,15 +262,27 @@ export function useDashboard() {
 
   // ─── 고객사 상세 모달 ───
   const openClientModal = useCallback(async (accountId: number, type?: string) => {
+    const t = type || "churned";
+    const cacheKey = `${accountId}:${t}`;
+
     setClientModalOpen(true);
-    setClientModalLoading(true);
     setClientModalData(null);
+
+    // 캐시 적중 시 즉시 반환 (로딩 표시 불필요)
+    const cachedData = clientModalCacheRef.current.get(cacheKey);
+    if (cachedData) {
+      setClientModalData(cachedData);
+      return;
+    }
+
+    // 캐시 미스: API 호출
+    setClientModalLoading(true);
     try {
-      const t = type || "churned";
       const data = await apiGet<ClientModalData>(
         `/api/dashboard/clients/modal?accountId=${accountId}&type=${t}`
       );
       setClientModalData(data);
+      clientModalCacheRef.current.set(cacheKey, data);
     } catch (err) {
       console.error("[Dashboard] client modal fetch error:", err);
       setClientModalData(null);
@@ -275,6 +290,7 @@ export function useDashboard() {
       setClientModalLoading(false);
     }
   }, []);
+
 
   const closeClientModal = useCallback(() => {
     setClientModalOpen(false);

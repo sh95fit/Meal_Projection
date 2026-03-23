@@ -1,7 +1,7 @@
 // app/(main)/dashboard/_components/ClientDetailModal.tsx
 "use client";
 
-import { ReactElement, useState } from "react";
+import { ReactElement, useState, useMemo } from "react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -114,18 +114,21 @@ export function ClientDetailModal({ open, loading, data, onClose }: Props) {
   const valid = isValidModalData(data);
   const [chartMode, setChartMode] = useState<"total" | "product">("total");
 
-  const productList = valid ? (data.productList ?? []) : [];
+  const productList = useMemo(() => {
+    return valid ? (data.productList ?? []) : [];
+  }, [valid, data]);
 
   // 추이 데이터에 _total 키 추가 (상품별 모드 상단 합계 라벨용)
-  const trendData = valid
-    ? (data.recentTrend ?? []).map((row) => {
-        let total = 0;
-        for (const pl of productList) {
-          total += Number(row[pl.productName] || 0);
-        }
-        return { ...row, _total: total };
-      })
-    : [];
+  const trendData = useMemo(() => {
+    if (!valid) return [];
+    return (data.recentTrend ?? []).map((row) => {
+      let total = 0;
+      for (const pl of productList) {
+        total += Number(row[pl.productName] || 0);
+      }
+      return { ...row, _total: total };
+    });
+  }, [valid, data, productList]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
