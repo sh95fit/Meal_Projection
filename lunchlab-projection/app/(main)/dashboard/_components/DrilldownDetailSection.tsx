@@ -14,6 +14,10 @@ import type {
   ProductChip,
 } from "@/types/dashboard";
 
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
 interface Props {
   data: DrilldownDetailResponse | null;
   date: string;
@@ -22,6 +26,10 @@ interface Props {
 }
 
 type WeekdayFilter = "all" | "lapsed" | "new" | "unassigned";
+
+/* ------------------------------------------------------------------ */
+/*  FilterTab                                                          */
+/* ------------------------------------------------------------------ */
 
 function FilterTab({
   label, count, active, onClick,
@@ -46,6 +54,10 @@ function FilterTab({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  SummaryCard                                                        */
+/* ------------------------------------------------------------------ */
+
 function SummaryCard({
   label, value, className,
 }: {
@@ -59,10 +71,14 @@ function SummaryCard({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  computeNetSummary                                                  */
+/* ------------------------------------------------------------------ */
+
 function computeNetSummary(
   clients: WeekdayCaseClient[],
   filter: WeekdayFilter,
-  productChips: ProductChip[]
+  productChips: ProductChip[],
 ) {
   const filtered = filter === "all" ? clients : clients.filter((c) => c.case === filter);
   const totalNet = filtered.reduce((sum, c) => sum + c.diff, 0);
@@ -87,14 +103,77 @@ function computeNetSummary(
   return { totalNet, productNets };
 }
 
+/* ------------------------------------------------------------------ */
+/*  DrilldownDetailSection                                             */
+/* ------------------------------------------------------------------ */
+
 export function DrilldownDetailSection({ data, date, loading, onClose }: Props) {
   const [weekdayFilter, setWeekdayFilter] = useState<WeekdayFilter>("all");
 
+  /* ── C-2: 요일 순증감 (기존 useMemo 유지) ── */
   const weekdayNetSummary = useMemo(() => {
     if (!data) return { totalNet: 0, productNets: [] };
     return computeNetSummary(data.weekdayClients, weekdayFilter, data.productChips);
   }, [data, weekdayFilter]);
 
+  /* ── C-2: 수량 특이 고객사 필터링 + QuantityClient 변환 (useMemo 추가) ── */
+  const filteredQuantityClients = useMemo<QuantityClient[]>(() => {
+    if (!data) return [];
+    const weekdayAccountIds = new Set(data.weekdayClients.map((c) => c.accountId));
+    return data.quantityClients
+      .filter((c) => !weekdayAccountIds.has(c.accountId) && Math.abs(c.diff ?? 0) >= 3)
+      .map((c) => ({
+        accountId: c.accountId,
+        accountName: c.accountName,
+        accountStatus: c.accountStatus,
+        subscriptionAt: c.subscriptionAt,
+        dowOrderCount: c.dowOrderCount,
+        totalLast: c.lastWeekQty,
+        totalThis: c.thisWeekQty,
+        totalDiff: c.diff,
+        products: c.products.map((p) => ({
+          productName: p.productName,
+          lastWeekQty: p.lastWeek,
+          thisWeekQty: p.thisWeek,
+          diff: p.diff,
+        })),
+      }));
+  }, [data]);
+
+  /* ── C-2: 수량 순증감 계산 (useMemo 추가) ── */
+  const { qtyTotalNet, qtyProductNets } = useMemo(() => {
+    if (!data) {
+      return {
+        qtyTotalNet: 0,
+        qtyProductNets: [] as { name: string; color: string; net: number }[],
+      };
+    }
+
+    let totalNet = 0;
+    const productNetMap = new Map<string, number>();
+
+    for (const c of filteredQuantityClients) {
+      totalNet += c.totalDiff;
+      for (const p of c.products) {
+        productNetMap.set(
+          p.productName,
+          (productNetMap.get(p.productName) || 0) + p.diff,
+        );
+      }
+    }
+
+    const productNets: { name: string; color: string; net: number }[] = [];
+    for (const chip of data.productChips) {
+      const net = productNetMap.get(chip.productName);
+      if (net !== undefined && net !== 0) {
+        productNets.push({ name: chip.productName, color: chip.color, net });
+      }
+    }
+
+    return { qtyTotalNet: totalNet, qtyProductNets: productNets };
+  }, [filteredQuantityClients, data]);
+
+  /* ── Loading ── */
   if (loading) {
     return (
       <Card>
@@ -108,41 +187,7 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
 
   if (!data) return null;
 
-  const weekdayAccountIds = new Set(data.weekdayClients.map((c) => c.accountId));
-  const filteredQuantityClients: QuantityClient[] = data.quantityClients
-    .filter((c) => !weekdayAccountIds.has(c.accountId) && Math.abs(c.diff ?? 0) >= 3)
-    .map((c) => ({
-      accountId: c.accountId,
-      accountName: c.accountName,
-      accountStatus: c.accountStatus,              // ★ 추가
-      subscriptionAt: c.subscriptionAt,
-      dowOrderCount: c.dowOrderCount,
-      totalLast: c.lastWeekQty,
-      totalThis: c.thisWeekQty,
-      totalDiff: c.diff,
-      products: c.products.map((p) => ({
-        productName: p.productName,
-        lastWeekQty: p.lastWeek,
-        thisWeekQty: p.thisWeek,
-        diff: p.diff,
-      })),
-    }));
-
-  const qtyTotalNet = filteredQuantityClients.reduce((sum, c) => sum + c.totalDiff, 0);
-  const qtyProductNetMap = new Map<string, number>();
-  for (const c of filteredQuantityClients) {
-    for (const p of c.products) {
-      qtyProductNetMap.set(p.productName, (qtyProductNetMap.get(p.productName) || 0) + p.diff);
-    }
-  }
-  const qtyProductNets: { name: string; color: string; net: number }[] = [];
-  for (const chip of data.productChips) {
-    const net = qtyProductNetMap.get(chip.productName);
-    if (net !== undefined && net !== 0) {
-      qtyProductNets.push({ name: chip.productName, color: chip.color, net });
-    }
-  }
-
+  /* ── Render ── */
   return (
     <Card>
       <CardHeader>
@@ -157,6 +202,7 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
       </CardHeader>
 
       <CardContent className="space-y-6">
+        {/* ──────────────── Summary Cards ──────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <SummaryCard label="주문 고객사" value={data.orderedCount} />
           <SummaryCard label="미주문 고객사" value={data.unorderedCount} />
@@ -165,6 +211,7 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
           <SummaryCard label="이탈" value={data.lapsedCount} className="border-red-200 bg-red-50/50" />
         </div>
 
+        {/* ──────────────── Product Chips ──────────────── */}
         <div className="flex flex-wrap gap-2">
           {data.productChips.map((chip) => (
             <span
@@ -178,7 +225,7 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
           ))}
         </div>
 
-        {/* ── 요일 기준 특이 고객사 ── */}
+        {/* ──────────────── 요일 기준 특이 고객사 ──────────────── */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">
@@ -218,7 +265,7 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
           </CardContent>
         </Card>
 
-        {/* ── 수량 기준 이상치 ── */}
+        {/* ──────────────── 수량 기준 이상치 ──────────────── */}
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
