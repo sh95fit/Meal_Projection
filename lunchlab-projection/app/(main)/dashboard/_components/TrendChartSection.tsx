@@ -1,4 +1,4 @@
-// app/(main)/dashboard/_components/TrendChartSection.tsx
+// app/(main)/dashboard/_components/TrendChartSection.tsx (전체 교체)
 "use client";
 
 import { ReactElement, useMemo } from "react";
@@ -89,7 +89,8 @@ export function TrendChartSection({
   onPresetChange, onCustomRangeChange, onToggleProduct,
   loading,
 }: Props) {
-  // ★ #7: useMemo로 filteredRows + visibleProducts 메모이제이션
+  // ★ 모든 useMemo를 early return 이전에 배치
+
   const visibleProducts = useMemo(() => {
     if (!data) return [];
     return data.productList.filter((p) => !excludedProducts.has(p.productName));
@@ -114,6 +115,14 @@ export function TrendChartSection({
     });
   }, [data, excludedProducts]);
 
+  const highlightShape = useMemo(() => makeHighlightShape(activeDate), [activeDate]);
+
+  const chartKey = useMemo(
+    () => visibleProducts.map((p) => p.productId).join("-"),
+    [visibleProducts],
+  );
+
+  // ★ early return은 모든 Hook 호출 이후
   if (!data || filteredRows.length === 0) {
     return (
       <Card>
@@ -136,12 +145,7 @@ export function TrendChartSection({
   };
 
   const showProductLabels = visibleProducts.length > 1;
-  const highlightShape = useMemo(() => makeHighlightShape(activeDate), [activeDate]);
   const lastProductIndex = visibleProducts.length - 1;
-  const chartKey = useMemo(
-    () => visibleProducts.map((p) => p.productId).join("-"),
-    [visibleProducts]
-  );
 
   return (
     <Card>
