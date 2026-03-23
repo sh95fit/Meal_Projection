@@ -40,6 +40,7 @@ import type {
 } from "@/types/dashboard";
 import { getProductColorMap } from "@/lib/repositories/productRepository";
 import { PRESET_COLORS } from "@/lib/utils/color";
+import { cached } from "@/lib/cache";
 
 // ──────────────────────────────────────────────────────────────────
 // 내부 타입
@@ -78,29 +79,31 @@ function resolveColor(
  * 반복 호출이 필요한 곳에서 1회 로드하여 재사용합니다.
  */
 async function loadProductMappingMap(): Promise<ProductMappingMap> {
-  const supabase = await createClient();
-  const { data: products } = await supabase
-    .from("products")
-    .select("id, product_name, product_id_mappings(channel, external_id)")
-    .is("deleted_at", null);
+  return cached("productMappingMap", 5 * 60 * 1000, async () => {
+    const supabase = await createClient();
+    const { data: products } = await supabase
+      .from("products")
+      .select("id, product_name, product_id_mappings(channel, external_id)")
+      .is("deleted_at", null);
 
-  const map: ProductMappingMap = new Map();
-  if (!products || products.length === 0) return map;
+    const map: ProductMappingMap = new Map();
+    if (!products || products.length === 0) return map;
 
-  for (const p of products) {
-    const raw = p as Record<string, unknown>;
-    const mappings = (raw.product_id_mappings || []) as {
-      channel: string;
-      external_id: string;
-    }[];
-    for (const m of mappings) {
-      map.set(`${m.channel}:${m.external_id}`, {
-        productId: Number(raw.id),
-        productName: String(raw.product_name),
-      });
+    for (const p of products) {
+      const raw = p as Record<string, unknown>;
+      const mappings = (raw.product_id_mappings || []) as {
+        channel: string;
+        external_id: string;
+      }[];
+      for (const m of mappings) {
+        map.set(`${m.channel}:${m.external_id}`, {
+          productId: Number(raw.id),
+          productName: String(raw.product_name),
+        });
+      }
     }
-  }
-  return map;
+    return map;
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -597,7 +600,10 @@ export async function getTrendData(
   startDate: string,
   endDate: string
 ): Promise<TrendResponse> {
-  const colorMap = await getProductColorMap();
+  const [colorMap, mappingMap] = await Promise.all([
+    getProductColorMap(),
+    loadProductMappingMap(),
+  ]);
 
   const supabase = await createClient();
   const { data: productRows } = await supabase
@@ -612,6 +618,7 @@ export async function getTrendData(
     color: resolveColor(String(p.product_name), colorMap, idx),
   }));
 
+  // 날짜 목록 생성
   const dates: string[] = [];
   let cursor = startDate;
   while (cursor <= endDate) {
@@ -619,24 +626,65 @@ export async function getTrendData(
     cursor = addDays(cursor, 1);
   }
 
-  // ★ 상품 매핑을 1회 로드 → N일 반복 호출에 재사용
-  const mappingMap = await loadProductMappingMap();
-
-  const orderResults = await Promise.all(
-    dates.map((d) => getOrdersByDate(d, mappingMap))
-  );
-
-  const rows: TrendRow[] = dates.map((date, idx) => {
-    const { orders } = orderResults[idx];
-
-    const byProduct = new Map<number, number>();
-    for (const o of orders) {
-      byProduct.set(
-        o.productId,
-        (byProduct.get(o.productId) || 0) + o.quantity
-      );
+  // ★ 마감 완료 날짜 vs 미마감 날짜 분리
+  const closedDates: string[] = [];
+  const pendingDates: string[] = [];
+  for (const d of dates) {
+    if (needsAppMenuMerge(d)) {
+      pendingDates.push(d);
+    } else {
+      closedDates.push(d);
     }
+  }
 
+  // 마감 완료 날짜: 단일 벌크 쿼리
+  const dateProductMap = new Map<string, Map<number, number>>();
+
+  if (closedDates.length > 0) {
+    const bulkRows = (await queryMySQL(
+      `SELECT o.delivery_date,
+              CAST(od.product_id AS CHAR) AS external_product_id,
+              CAST(SUM(od.quantity) AS SIGNED) AS quantity
+       FROM orders o
+       JOIN \`order-details\` od ON od.order_id = o.id
+       WHERE o.delivery_date >= ? AND o.delivery_date <= ?
+         AND o.delivery_date >= '${DATA_START_DATE}'
+         AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+       GROUP BY o.delivery_date, od.product_id
+       ORDER BY o.delivery_date`,
+      [closedDates[0], closedDates[closedDates.length - 1]]
+    )) as Record<string, unknown>[];
+
+    for (const row of bulkRows) {
+      const date = toDateStr(row.delivery_date) ?? "";
+      if (!date) continue;
+      const extId = String(row.external_product_id || "");
+      const mapped = mappingMap.get(`web:${extId}`);
+      if (!mapped) continue;
+
+      if (!dateProductMap.has(date)) dateProductMap.set(date, new Map());
+      const pMap = dateProductMap.get(date)!;
+      pMap.set(mapped.productId, (pMap.get(mapped.productId) || 0) + (Number(row.quantity) || 0));
+    }
+  }
+
+  // ★ 미마감 날짜: 기존 getOrdersByDate로 개별 처리 (보통 1~2일)
+  if (pendingDates.length > 0) {
+    const pendingResults = await Promise.all(
+      pendingDates.map((d) => getOrdersByDate(d, mappingMap))
+    );
+    pendingDates.forEach((date, idx) => {
+      const pMap = new Map<number, number>();
+      for (const o of pendingResults[idx].orders) {
+        pMap.set(o.productId, (pMap.get(o.productId) || 0) + o.quantity);
+      }
+      dateProductMap.set(date, pMap);
+    });
+  }
+
+  // 결과 조립
+  const rows: TrendRow[] = dates.map((date) => {
+    const byProduct = dateProductMap.get(date) || new Map();
     const row: TrendRow = { date, dayLabel: formatDayLabel(date) };
     let total = 0;
     for (const pl of productList) {

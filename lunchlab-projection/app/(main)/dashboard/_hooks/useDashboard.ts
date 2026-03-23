@@ -17,6 +17,10 @@ import type {
 const REFRESH_INTERVAL = 3 * 60 * 1000;
 
 export function useDashboard() {
+  // ─── ★ 캐시 (useRef → 렌더 간 유지, refreshAll 시 초기화) ───
+  const trendCacheRef = useRef<Map<string, TrendResponse>>(new Map());
+  const clientsCacheRef = useRef<Map<string, ClientChangeResponse>>(new Map());
+
   // ─── 실시간 섹션 ───
   const [realtimeDate, setRealtimeDateState] = useState<string>(() => getDefaultRealtimeDate());
   const [realtime, setRealtime] = useState<RealtimeResponse | null>(null);
@@ -97,7 +101,7 @@ export function useDashboard() {
 
   const fetchRealtime = useCallback(async (date?: string) => {
     const targetDate = date || realtimeDateRef.current;
-    const requestId = ++realtimeRequestIdRef.current; // ★ 요청 ID 발급
+    const requestId = ++realtimeRequestIdRef.current;
 
     try {
       setRealtimeLoading(true);
@@ -134,10 +138,21 @@ export function useDashboard() {
     if (!force && query === lastTrendQueryRef.current) return;
     lastTrendQueryRef.current = query;
 
+    // ★ 캐시 적중 확인 (force가 아닌 경우)
+    if (!force) {
+      const cached = trendCacheRef.current.get(query);
+      if (cached) {
+        setTrend(cached);
+        return;
+      }
+    }
+
     try {
       setTrendLoading(true);
       const data = await apiGet<TrendResponse>(`/api/dashboard/trend?${query}`);
       setTrend(data);
+      // ★ 캐시에 저장
+      trendCacheRef.current.set(query, data);
     } catch (err) {
       console.error("[Dashboard] trend fetch error:", err);
     } finally {
@@ -182,10 +197,21 @@ export function useDashboard() {
     if (!force && url === lastClientQueryRef.current) return;
     lastClientQueryRef.current = url;
 
+    // ★ 캐시 적중 확인 (force가 아닌 경우)
+    if (!force) {
+      const cached = clientsCacheRef.current.get(url);
+      if (cached) {
+        setClients(cached);
+        return;
+      }
+    }
+
     try {
       setClientsLoading(true);
       const data = await apiGet<ClientChangeResponse>(url);
       setClients(data);
+      // ★ 캐시에 저장
+      clientsCacheRef.current.set(url, data);
     } catch (err) {
       console.error("[Dashboard] clients fetch error:", err);
     } finally {
@@ -196,6 +222,12 @@ export function useDashboard() {
   // ─── 전체 새로고침 ───
   const refreshAll = useCallback(async () => {
     setLoading(true);
+    // ★ force refresh이므로 캐시 초기화
+    trendCacheRef.current.clear();
+    clientsCacheRef.current.clear();
+    lastTrendQueryRef.current = "";
+    lastClientQueryRef.current = "";
+
     await fetchRealtime();
     // ★ force=true로 중복 방지 우회
     await Promise.all([fetchTrend(true), fetchClients(true)]);
@@ -330,7 +362,7 @@ export function useDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realtimeDate]);
 
-  // ─── ★ 추이 차트: 필터 변경 시에만 fetch (16ms 배칭 + 동일 쿼리 skip) ───
+  // ─── ★ 추이 차트: 필터 변경 시에만 fetch (16ms 배칭 + 동일 쿼리 skip + 캐시) ───
   useEffect(() => {
     if (!initializedRef.current) return;
     const timer = setTimeout(() => {
