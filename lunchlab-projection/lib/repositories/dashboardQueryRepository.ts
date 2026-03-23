@@ -474,41 +474,41 @@ export async function getRealtimeData(
     });
   }
 
-  // ─── forecast fallback: 최근 4주 같은 요일 평균 ───
-  const hasForecast = forecastMap.size > 0;
-  const fallbackMap = new Map<number, number>();
+  // // ─── forecast fallback: 최근 4주 같은 요일 평균 ───
+  // const hasForecast = forecastMap.size > 0;
+  // const fallbackMap = new Map<number, number>();
 
-  if (!hasForecast) {
-    // ★ 4주 병렬 조회 + 매핑맵 재사용
-    const recentResults = await Promise.all(
-      [1, 2, 3, 4].map((i) =>
-        getOrdersByDate(addDays(deliveryDate, -7 * i), mappingMap)
-      )
-    );
+  // if (!hasForecast) {
+  //   // ★ 4주 병렬 조회 + 매핑맵 재사용
+  //   const recentResults = await Promise.all(
+  //     [1, 2, 3, 4].map((i) =>
+  //       getOrdersByDate(addDays(deliveryDate, -7 * i), mappingMap)
+  //     )
+  //   );
 
-    const productTotals = new Map<number, { total: number; count: number }>();
-    for (const result of recentResults) {
-      const dateProductMap = new Map<number, number>();
-      for (const o of result.orders) {
-        dateProductMap.set(
-          o.productId,
-          (dateProductMap.get(o.productId) || 0) + o.quantity
-        );
-      }
-      for (const [pid, qty] of dateProductMap) {
-        const existing = productTotals.get(pid);
-        if (existing) {
-          existing.total += qty;
-          existing.count += 1;
-        } else {
-          productTotals.set(pid, { total: qty, count: 1 });
-        }
-      }
-    }
-    for (const [pid, data] of productTotals) {
-      fallbackMap.set(pid, Math.round(data.total / data.count));
-    }
-  }
+  //   const productTotals = new Map<number, { total: number; count: number }>();
+  //   for (const result of recentResults) {
+  //     const dateProductMap = new Map<number, number>();
+  //     for (const o of result.orders) {
+  //       dateProductMap.set(
+  //         o.productId,
+  //         (dateProductMap.get(o.productId) || 0) + o.quantity
+  //       );
+  //     }
+  //     for (const [pid, qty] of dateProductMap) {
+  //       const existing = productTotals.get(pid);
+  //       if (existing) {
+  //         existing.total += qty;
+  //         existing.count += 1;
+  //       } else {
+  //         productTotals.set(pid, { total: qty, count: 1 });
+  //       }
+  //     }
+  //   }
+  //   for (const [pid, data] of productTotals) {
+  //     fallbackMap.set(pid, Math.round(data.total / data.count));
+  //   }
+  // }
 
   // ─── 상품별 집계 ───
   const todayByProduct = new Map<number, { name: string; qty: number }>();
@@ -541,14 +541,17 @@ export async function getRealtimeData(
     const pid = Number(p.id);
     const todayQty = todayByProduct.get(pid)?.qty || 0;
     const lastWeekQty = lastWeekByProduct.get(pid) || 0;
+    // const forecast = forecastMap.get(pid);
+    // const fallbackQty = fallbackMap.get(pid) || 0;
+    // const forecastQty =
+    //   forecast && forecast.forecastQty > 0
+    //     ? forecast.forecastQty
+    //     : fallbackQty > 0
+    //       ? fallbackQty
+    //       : 0;
     const forecast = forecastMap.get(pid);
-    const fallbackQty = fallbackMap.get(pid) || 0;
-    const forecastQty =
-      forecast && forecast.forecastQty > 0
-        ? forecast.forecastQty
-        : fallbackQty > 0
-          ? fallbackQty
-          : 0;
+    const forecastQty = forecast?.forecastQty ?? 0;
+
 
     return {
       productId: pid,
