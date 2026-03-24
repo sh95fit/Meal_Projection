@@ -72,7 +72,7 @@ function SummaryCard({
 }
 
 /* ------------------------------------------------------------------ */
-/*  computeNetSummary                                                  */
+/*  computeNetSummary — 전체 순증 = 상품별 순증 합계 정합성 보장       */
 /* ------------------------------------------------------------------ */
 
 function computeNetSummary(
@@ -81,14 +81,17 @@ function computeNetSummary(
   productChips: ProductChip[],
 ) {
   const filtered = filter === "all" ? clients : clients.filter((c) => c.case === filter);
-  const totalNet = filtered.reduce((sum, c) => sum + c.diff, 0);
 
+  // ★ 수정: totalNet도 상품별과 동일한 기준으로 계산하여 정합성 보장
+  let totalNet = 0;
   const productNetMap = new Map<string, number>();
+
   for (const c of filtered) {
     const sign = c.case === "lapsed" ? -1 : 1;
     for (const p of c.products) {
-      const prev = productNetMap.get(p.productName) || 0;
-      productNetMap.set(p.productName, prev + (sign === -1 ? -p.qty : p.qty));
+      const val = sign === -1 ? -p.qty : p.qty;
+      productNetMap.set(p.productName, (productNetMap.get(p.productName) || 0) + val);
+      totalNet += val;
     }
   }
 
