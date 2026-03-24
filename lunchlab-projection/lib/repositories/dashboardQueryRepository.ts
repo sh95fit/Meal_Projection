@@ -537,7 +537,7 @@ export async function getTrendData(
 
   const dateProductMap = new Map<string, Map<number, number>>();
 
-  // ★ #8: 마감 완료 날짜 벌크 쿼리에 trial 주문 제외
+  // ★ #8: 마감 완료 날짜 벌크 쿼리
   if (closedDates.length > 0) {
     const bulkRows = (await queryMySQL(
       `SELECT DATE_FORMAT(o.delivery_date, '%Y-%m-%d') AS delivery_date,
@@ -548,12 +548,6 @@ export async function getTrendData(
        WHERE o.delivery_date >= ? AND o.delivery_date <= ?
          AND o.delivery_date >= '${DATA_START_DATE}'
          AND o.deleted_at IS NULL AND od.deleted_at IS NULL
-         AND o.id NOT IN (
-           SELECT tso.order_id
-           FROM trial_schedule_orders tso
-           JOIN trial_schedules ts ON ts.id = tso.trial_schedule_id
-           WHERE ts.deleted_at IS NULL AND tso.deleted_at IS NULL
-         )
        GROUP BY o.delivery_date, od.product_id
        ORDER BY o.delivery_date`,
       [closedDates[0], closedDates[closedDates.length - 1]]
