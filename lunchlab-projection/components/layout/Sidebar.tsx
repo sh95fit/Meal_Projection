@@ -1,7 +1,7 @@
 // components/layout/Sidebar.tsx
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Separator } from "@/components/ui/separator";
@@ -16,24 +16,21 @@ const menuItems = [
 
 function isMenuActive(pathname: string, href: string): boolean {
   if (pathname === href) return true;
-
-  // /forecasts 는 정확히 일치할 때만 active (하위 경로 제외)
   if (href === "/forecasts") return pathname === "/forecasts";
-
   return pathname.startsWith(href + "/");
 }
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const prevPathRef = useRef(pathname);
 
-  // 라우트 변경 감지 → 모바일 메뉴 닫기 (lint-safe)
-  if (prevPathRef.current !== pathname) {
-    prevPathRef.current = pathname;
-    if (mobileOpen) {
-      setMobileOpen(false);
-    }
+  // pathname이 변경되면 React가 key 변경으로 state를 리셋하는 대신,
+  // 단순히 pathname을 deps로 두고 닫힌 상태로 초기화
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [trackedPath, setTrackedPath] = useState(pathname);
+
+  if (trackedPath !== pathname) {
+    setTrackedPath(pathname);
+    setMobileOpen(false);
   }
 
   // 모바일 메뉴 열릴 때 스크롤 잠금
