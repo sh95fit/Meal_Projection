@@ -1,4 +1,4 @@
-// app/(main)/dashboard/_components/QuantityTable.tsx (전체 교체)
+// app/(main)/dashboard/_components/QuantityTable.tsx
 "use client";
 
 import { StatusBadge } from "./shared/StatusBadge";
@@ -13,31 +13,19 @@ interface Props {
   onClientClick?: (accountId: number) => void;
 }
 
-const thClass =
-  "py-2 px-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap";
-const thRight =
-  "py-2 px-3 text-right text-xs font-medium text-gray-500 whitespace-nowrap";
-const tdClass = "py-2.5 px-3";
-const tdRight = "py-2.5 px-3 text-right";
+const thClass = "py-1.5 lg:py-2 px-2 lg:px-3 text-left text-[10px] lg:text-xs font-medium text-gray-500 whitespace-nowrap";
+const thRight = "py-1.5 lg:py-2 px-2 lg:px-3 text-right text-[10px] lg:text-xs font-medium text-gray-500 whitespace-nowrap";
+const tdClass = "py-2 lg:py-2.5 px-2 lg:px-3";
+const tdRight = "py-2 lg:py-2.5 px-2 lg:px-3 text-right";
 
-export function QuantityTable({
-  clients,
-  scope,
-  productChips,
-  targetDate,
-  onClientClick,
-}: Props) {
+export function QuantityTable({ clients, scope, productChips, targetDate, onClientClick }: Props) {
   if (clients.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-4 text-center">
-        수량 변동 특이 고객사가 없습니다.
-      </p>
-    );
+    return <p className="text-sm text-muted-foreground py-4 text-center">수량 변동 특이 고객사가 없습니다.</p>;
   }
 
   return (
     <div className="overflow-auto max-h-[420px] border rounded-md">
-      <table className="w-full text-sm">
+      <table className="w-full text-xs lg:text-sm min-w-[650px]">
         <thead className="sticky top-0 bg-white z-10 border-b">
           <tr>
             <th className={thClass}>고객사</th>
@@ -48,27 +36,15 @@ export function QuantityTable({
             <th className={thRight}>금주 총수량</th>
             <th className={thRight}>변화</th>
             <th className={thRight}>변화율</th>
-            <th className={`${thClass} pl-6`}>주문 상품</th>
+            <th className={`${thClass} pl-4 lg:pl-6`}>주문 상품</th>
           </tr>
         </thead>
         <tbody>
           {clients.map((c) => {
-            const cls =
-              c.totalDiff > 0
-                ? "text-green-600"
-                : c.totalDiff < 0
-                  ? "text-red-600"
-                  : "";
-            const arrow =
-              c.totalDiff > 0 ? "▲" : c.totalDiff < 0 ? "▼" : "";
-            const rate =
-              c.totalLast > 0
-                ? Math.round((c.totalDiff / c.totalLast) * 100)
-                : "—";
-            const retentionDays = calcDaysBetween(
-              c.subscriptionAt,
-              targetDate
-            );
+            const cls = c.totalDiff > 0 ? "text-green-600" : c.totalDiff < 0 ? "text-red-600" : "";
+            const arrow = c.totalDiff > 0 ? "▲" : c.totalDiff < 0 ? "▼" : "";
+            const rate = c.totalLast > 0 ? Math.round((c.totalDiff / c.totalLast) * 100) : "—";
+            const retentionDays = calcDaysBetween(c.subscriptionAt, targetDate);
 
             return (
               <tr
@@ -76,74 +52,36 @@ export function QuantityTable({
                 className={`border-b last:border-0 ${onClientClick ? "cursor-pointer" : ""} hover:bg-gray-50`}
                 onClick={() => onClientClick?.(c.accountId)}
               >
-                <td className={`${tdClass} font-semibold`}>
-                  {c.accountName}
-                </td>
-                <td className={tdClass}>
-                  <StatusBadge status={c.accountStatus} />
-                </td>
-                <td
-                  className={`${tdClass} text-xs text-gray-500 whitespace-nowrap`}
-                >
+                <td className={`${tdClass} font-semibold whitespace-nowrap`}>{c.accountName}</td>
+                <td className={tdClass}><StatusBadge status={c.accountStatus} /></td>
+                <td className={`${tdClass} text-[10px] lg:text-xs text-gray-500 whitespace-nowrap`}>
                   {c.subscriptionAt ? (
                     <>
                       {c.subscriptionAt.slice(0, 10)}
-                      {retentionDays !== null && (
-                        <span className="text-gray-400 ml-1">
-                          ({retentionDays}일)
-                        </span>
-                      )}
+                      {retentionDays !== null && <span className="text-gray-400 ml-1">({retentionDays}일)</span>}
                     </>
-                  ) : (
-                    <span className="text-gray-300">-</span>
-                  )}
+                  ) : <span className="text-gray-300">-</span>}
                 </td>
-                <td className={`${tdRight} text-xs`}>{c.dowOrderCount}회</td>
+                <td className={`${tdRight} text-[10px] lg:text-xs`}>{c.dowOrderCount}회</td>
                 <td className={tdRight}>{c.totalLast}</td>
                 <td className={tdRight}>{c.totalThis}</td>
-                <td className={`${tdRight} font-bold ${cls}`}>
-                  {arrow} {Math.abs(c.totalDiff)}
-                </td>
-                <td className={`${tdRight} ${cls}`}>
-                  {typeof rate === "number" ? `${rate}%` : rate}
-                </td>
-                <td className={`${tdClass} pl-6`}>
-                  <div className="flex flex-wrap gap-1.5">
+                <td className={`${tdRight} font-bold ${cls}`}>{arrow} {Math.abs(c.totalDiff)}</td>
+                <td className={`${tdRight} ${cls}`}>{typeof rate === "number" ? `${rate}%` : rate}</td>
+                <td className={`${tdClass} pl-4 lg:pl-6`}>
+                  <div className="flex flex-wrap gap-1">
                     {c.products.map((p) => {
-                      const chip = productChips.find(
-                        (ch) => ch.productName === p.productName
-                      );
+                      const chip = productChips.find((ch) => ch.productName === p.productName);
                       const color = chip?.color ?? "#6b7280";
-                      const diff = p.diff;
-                      const diffColor =
-                        diff > 0
-                          ? "text-blue-600"
-                          : diff < 0
-                            ? "text-red-600"
-                            : "text-gray-400";
-                      const diffPrefix = diff > 0 ? "+" : "";
+                      const diffColor = p.diff > 0 ? "text-blue-600" : p.diff < 0 ? "text-red-600" : "text-gray-400";
 
                       return (
-                        <span
-                          key={p.productName}
-                          className="inline-flex items-center gap-1 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5"
-                        >
-                          <span
-                            className="inline-block w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: color }}
-                          />
+                        <span key={p.productName} className="inline-flex items-center gap-1 text-[10px] lg:text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-1 lg:px-1.5 py-0.5">
+                          <span className="inline-block w-1.5 lg:w-2 h-1.5 lg:h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
                           {p.productName}
-                          <span className="text-gray-500">
-                            {p.lastWeekQty}
-                          </span>
+                          <span className="text-gray-500">{p.lastWeekQty}</span>
                           <span className="text-gray-400">→</span>
-                          <span className="text-gray-700 font-medium">
-                            {p.thisWeekQty}
-                          </span>
-                          <span className={`font-medium ${diffColor}`}>
-                            ({diffPrefix}
-                            {diff})
-                          </span>
+                          <span className="text-gray-700 font-medium">{p.thisWeekQty}</span>
+                          <span className={`font-medium ${diffColor}`}>({p.diff > 0 ? "+" : ""}{p.diff})</span>
                         </span>
                       );
                     })}

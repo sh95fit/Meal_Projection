@@ -1,7 +1,7 @@
-// app/(main)/dashboard/_components/TrendChartSection.tsx (전체 교체)
+// app/(main)/dashboard/_components/TrendChartSection.tsx
 "use client";
 
-import { ReactElement, useMemo } from "react";
+import { ReactElement, useMemo, useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +10,6 @@ import {
 } from "recharts";
 import type { LabelProps, BarShapeProps, BarRectangleItem } from "recharts";
 import type { TrendResponse, TrendRow, PeriodPreset } from "@/types/dashboard";
-
 import { Loader2 } from "lucide-react";
 
 interface Props {
@@ -89,8 +88,6 @@ export function TrendChartSection({
   onPresetChange, onCustomRangeChange, onToggleProduct,
   loading,
 }: Props) {
-  // ★ 모든 useMemo를 early return 이전에 배치
-
   const visibleProducts = useMemo(() => {
     if (!data) return [];
     return data.productList.filter((p) => !excludedProducts.has(p.productName));
@@ -122,11 +119,21 @@ export function TrendChartSection({
     [visibleProducts],
   );
 
-  // ★ early return은 모든 Hook 호출 이후
+  // ── 데스크탑 감지 (1024px 이상) ──
+  const [isDesktop, setIsDesktop] = useState(true);
+
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const handler = (e: MediaQueryListEvent | MediaQueryList) => setIsDesktop(e.matches);
+    handler(mql);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+
   if (!data || filteredRows.length === 0) {
     return (
       <Card>
-        <CardHeader><CardTitle className="text-lg">과거 주문 이력</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base lg:text-lg">과거 주문 이력</CardTitle></CardHeader>
         <CardContent>
           <p className="text-gray-400 text-sm">데이터가 없습니다.</p>
         </CardContent>
@@ -149,18 +156,34 @@ export function TrendChartSection({
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">과거 주문 이력</CardTitle>
+      <CardHeader className="pb-2 lg:pb-4">
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          <CardTitle className="text-base lg:text-lg">과거 주문 이력</CardTitle>
           {onBarClick && (
-            <p className="text-xs text-muted-foreground">
-              막대를 클릭하면 해당 일자의 상세 드릴다운을 확인할 수 있습니다.
+            <p className="text-[10px] lg:text-xs text-muted-foreground">
+              막대를 클릭하면 상세 드릴다운을 확인할 수 있습니다.
             </p>
           )}
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* ── 기간 프리셋 (모바일): 3열 그리드 ── */}
+        <div className="grid grid-cols-3 gap-1.5 lg:hidden">
+          {TREND_PRESETS.map((opt) => (
+            <Button
+              key={opt.value}
+              variant={preset === opt.value ? "default" : "outline"}
+              size="sm"
+              className="text-xs w-full"
+              onClick={() => onPresetChange(opt.value)}
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* ── 기간 프리셋 (데스크탑): 기존 flex 한 줄 + inline custom 날짜 ── */}
+        <div className="hidden lg:flex items-center gap-2 flex-wrap">
           {TREND_PRESETS.map((opt) => (
             <Button
               key={opt.value}
@@ -190,15 +213,35 @@ export function TrendChartSection({
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground font-medium">상품:</span>
+        {/* ── 커스텀 날짜 (모바일 전용) ── */}
+        {preset === "custom" && (
+          <div className="flex items-center gap-1.5 flex-wrap lg:hidden">
+            <input
+              type="date"
+              className="border rounded px-2 py-1 text-sm h-8 flex-1 min-w-[120px]"
+              value={customStart}
+              onChange={(e) => onCustomRangeChange(e.target.value, customEnd)}
+            />
+            <span className="text-gray-400 text-sm">~</span>
+            <input
+              type="date"
+              className="border rounded px-2 py-1 text-sm h-8 flex-1 min-w-[120px]"
+              value={customEnd}
+              onChange={(e) => onCustomRangeChange(customStart, e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* ── 상품 필터: 모바일 라벨 숨김 / 데스크탑 "상품:" 표시 ── */}
+        <div className="flex items-center gap-1.5 lg:gap-2 flex-wrap">
+          <span className="hidden lg:inline text-xs text-muted-foreground font-medium">상품:</span>
           {data.productList.map((p) => {
             const isExcluded = excludedProducts.has(p.productName);
             return (
               <button
                 key={p.productId}
                 type="button"
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                className={`inline-flex items-center gap-1 px-2 py-1 lg:px-2.5 rounded-full text-[11px] lg:text-xs font-medium border transition-all ${
                   isExcluded
                     ? "bg-gray-100 text-gray-400 border-gray-200 line-through"
                     : "text-white border-transparent"
@@ -216,6 +259,7 @@ export function TrendChartSection({
           })}
         </div>
 
+        {/* ── 차트 ── */}
         <div className="relative">
           {loading && (
             <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20 rounded-md">
@@ -223,46 +267,48 @@ export function TrendChartSection({
               <span className="ml-2 text-sm text-muted-foreground">불러오는 중…</span>
             </div>
           )}
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart
-              key={chartKey}
-              data={filteredRows}
-              margin={{ top: 25, right: 10, left: 10, bottom: 0 }}
-              style={{ cursor: onBarClick ? "pointer" : "default" }}
-            >
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="dayLabel" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{ fontSize: 12 }}
-                labelStyle={{ fontSize: 12, fontWeight: 600 }}
-                itemStyle={{ fontSize: 11, padding: "1px 0" }}
-                formatter={(value) => {
-                  if (Array.isArray(value)) return value.join(", ");
-                  return value != null ? Number(value).toLocaleString() : "0";
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 11 }} iconSize={10} />
-              {visibleProducts.map((product, idx) => (
-                <Bar
-                  key={product.productId}
-                  dataKey={product.productName}
-                  stackId="stack"
-                  fill={product.color}
-                  name={product.productName}
-                  onClick={handleBarClick}
-                  shape={highlightShape}
-                >
-                  {showProductLabels && (
-                    <LabelList dataKey={product.productName} content={ProductValueLabel} />
-                  )}
-                  {idx === lastProductIndex && (
-                    <LabelList dataKey="_total" position="top" content={TotalLabel} />
-                  )}
-                </Bar>
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="h-[280px] sm:h-[350px] lg:h-[400px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                key={chartKey}
+                data={filteredRows}
+                margin={{ top: 25, right: 5, left: 0, bottom: 0 }}
+                style={{ cursor: onBarClick ? "pointer" : "default" }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="dayLabel" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 10 }} width={35} />
+                <Tooltip
+                  contentStyle={{ fontSize: 12 }}
+                  labelStyle={{ fontSize: 12, fontWeight: 600 }}
+                  itemStyle={{ fontSize: 11, padding: "1px 0" }}
+                  formatter={(value) => {
+                    if (Array.isArray(value)) return value.join(", ");
+                    return value != null ? Number(value).toLocaleString() : "0";
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 10 }} iconSize={8} />
+                {visibleProducts.map((product, idx) => (
+                  <Bar
+                    key={product.productId}
+                    dataKey={product.productName}
+                    stackId="stack"
+                    fill={product.color}
+                    name={product.productName}
+                    onClick={handleBarClick}
+                    shape={highlightShape}
+                  >
+                    {isDesktop && showProductLabels && (
+                      <LabelList dataKey={product.productName} content={ProductValueLabel} />
+                    )}
+                    {isDesktop && idx === lastProductIndex && (
+                      <LabelList dataKey="_total" position="top" content={TotalLabel} />
+                    )}
+                  </Bar>
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </CardContent>
     </Card>

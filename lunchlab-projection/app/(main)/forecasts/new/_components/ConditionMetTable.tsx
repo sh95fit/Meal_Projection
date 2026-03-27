@@ -1,3 +1,4 @@
+// app/(main)/forecasts/new/_components/ConditionMetTable.tsx
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -10,27 +11,27 @@ interface Props {
 export function ConditionMetTable({ rows }: Props) {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-base">
+      <CardHeader className="px-4 lg:px-6">
+        <CardTitle className="text-sm lg:text-base">
           주문 확정 — 조건충족 ({rows.length}개사)
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-4 lg:px-6">
         <div className="max-h-64 overflow-auto">
           <Table containerClassName="overflow-visible">
             <TableHeader>
               <TableRow>
-                <TableHead>고객사명</TableHead>
-                <TableHead>채널</TableHead>
-                <TableHead className="text-right">상품수량</TableHead>
+                <TableHead className="text-xs lg:text-sm">고객사명</TableHead>
+                <TableHead className="text-xs lg:text-sm">채널</TableHead>
+                <TableHead className="text-xs lg:text-sm text-right">상품수량</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((row, idx) => (
                 <TableRow key={idx}>
-                  <TableCell>{row.고객사명}</TableCell>
-                  <TableCell><Badge variant="outline">{row.주문채널}</Badge></TableCell>
-                  <TableCell className="text-right">{row.상품수량}</TableCell>
+                  <TableCell className="text-xs lg:text-sm py-2 lg:py-3">{row.고객사명}</TableCell>
+                  <TableCell className="py-2 lg:py-3"><Badge variant="outline" className="text-[10px] lg:text-xs">{row.주문채널}</Badge></TableCell>
+                  <TableCell className="text-xs lg:text-sm text-right py-2 lg:py-3">{row.상품수량}</TableCell>
                 </TableRow>
               ))}
               {rows.length === 0 && (

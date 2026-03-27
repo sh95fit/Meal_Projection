@@ -1,4 +1,4 @@
-// app/(main)/dashboard/_components/RealtimeSection.tsx (전체 교체)
+// app/(main)/dashboard/_components/RealtimeSection.tsx
 "use client";
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -11,16 +11,10 @@ import type { RealtimeResponse } from "@/types/dashboard";
 interface Props {
   data: RealtimeResponse | null;
   loading: boolean;
-  /** 현재 조회 중인 날짜 */
   currentDate: string;
-  /** 날짜 변경 콜백 */
   onDateChange: (date: string) => void;
 }
 
-/**
- * 이전/다음 영업일을 계산합니다.
- * direction: -1 (이전), +1 (다음)
- */
 function findAdjacentBusinessDay(dateStr: string, direction: -1 | 1): string {
   let candidate = addDays(dateStr, direction);
   for (let i = 0; i < 14; i++) {
@@ -33,7 +27,6 @@ function findAdjacentBusinessDay(dateStr: string, direction: -1 | 1): string {
 export function RealtimeSection({ data, loading, currentDate, onDateChange }: Props) {
   if (!data && !loading) return null;
 
-  // ── 마감 카운트다운 ──
   const cutoffText = (() => {
     if (!data) return "";
     if (data.minutesUntilCutoff <= 0) return "마감 완료";
@@ -46,70 +39,53 @@ export function RealtimeSection({ data, loading, currentDate, onDateChange }: Pr
     return `마감까지 ${hours}시간 ${mins}분`;
   })();
 
-  const handlePrevDay = () => {
-    onDateChange(findAdjacentBusinessDay(currentDate, -1));
-  };
-
-  const handleNextDay = () => {
-    onDateChange(findAdjacentBusinessDay(currentDate, 1));
-  };
-
-  const handleDateInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onDateChange(e.target.value);
-  };
-
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-3">
-          <CardTitle className="text-lg">실시간 주문 현황</CardTitle>
-
-          {/* ── 날짜 선택 UI ── */}
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2 h-8"
-              onClick={handlePrevDay}
-              title="이전 영업일"
-            >
-              ◀
-            </Button>
-
-            <input
-              type="date"
-              className="border rounded px-2 py-1 text-sm h-8 w-[150px]"
-              value={currentDate}
-              onChange={handleDateInput}
-            />
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2 h-8"
-              onClick={handleNextDay}
-              title="다음 영업일"
-            >
-              ▶
-            </Button>
-
-            <span className="text-sm text-muted-foreground ml-1">
-              {formatDateWithDay(currentDate)}
-            </span>
+      <CardHeader className="pb-3 space-y-3">
+        {/* 첫 번째 줄: 타이틀 + 상태 뱃지 */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <CardTitle className="text-base lg:text-lg">실시간 주문 현황</CardTitle>
+          <div className="flex items-center gap-2">
+            {data && (
+              <>
+                <Badge variant={data.appOrdersMerged ? "secondary" : "default"} className="text-[10px] lg:text-xs">
+                  {data.appOrdersMerged ? "🔄 앱 주문 합산 중" : "✅ 앱 주문 이관 완료"}
+                </Badge>
+                <Badge variant="outline" className="text-[10px] lg:text-xs">
+                  {loading ? "갱신 중..." : cutoffText}
+                </Badge>
+              </>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {data && (
-            <>
-              <Badge variant={data.appOrdersMerged ? "secondary" : "default"}>
-                {data.appOrdersMerged ? "🔄 앱 주문 합산 중" : "✅ 앱 주문 이관 완료"}
-              </Badge>
-              <Badge variant="outline">
-                {loading ? "갱신 중..." : cutoffText}
-              </Badge>
-            </>
-          )}
+        {/* 두 번째 줄: 날짜 네비게이션 */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-2 h-8"
+            onClick={() => onDateChange(findAdjacentBusinessDay(currentDate, -1))}
+          >
+            ◀
+          </Button>
+          <input
+            type="date"
+            className="border rounded px-2 py-1 text-sm h-8 w-[140px] lg:w-[150px]"
+            value={currentDate}
+            onChange={(e) => onDateChange(e.target.value)}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-2 h-8"
+            onClick={() => onDateChange(findAdjacentBusinessDay(currentDate, 1))}
+          >
+            ▶
+          </Button>
+          <span className="text-xs lg:text-sm text-muted-foreground ml-1">
+            {formatDateWithDay(currentDate)}
+          </span>
         </div>
       </CardHeader>
 
@@ -119,7 +95,7 @@ export function RealtimeSection({ data, loading, currentDate, onDateChange }: Pr
             데이터를 불러오는 중...
           </p>
         ) : data ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
             {data.products.map((product) => (
               <ProductProgressCard key={product.productId} product={product} />
             ))}

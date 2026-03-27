@@ -1,10 +1,12 @@
+// components/layout/Sidebar.tsx
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Separator } from "@/components/ui/separator";
+import { Menu, X } from "lucide-react";
 
-// 메뉴 아이템 배열 — 나중에 여기에 추가하면 사이드바에 자동 반영
 const menuItems = [
   { label: "대시보드", href: "/dashboard" },
   { label: "발주 예상 산출", href: "/forecasts/new" },
@@ -14,14 +16,23 @@ const menuItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  return (
-    <aside className="w-60 border-r bg-white p-4 flex flex-col">
-      {/* 앱 로고/제목 */}
+  // 라우트 변경 시 모바일 메뉴 닫기
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  // 모바일 메뉴 열릴 때 스크롤 잠금
+  useEffect(() => {
+    document.body.style.overflow = mobileOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [mobileOpen]);
+
+  const navContent = (
+    <>
       <h2 className="text-lg font-bold mb-4">식수 예측</h2>
       <Separator className="mb-4" />
-
-      {/* 네비게이션 메뉴 */}
       <nav className="flex flex-col gap-1">
         {menuItems.map((item) => {
           const isActive =
@@ -41,10 +52,41 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      {/* 하단 여백 (나중에 설정/도움말 링크 추가 가능) */}
       <div className="mt-auto" />
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* ── 모바일 햄버거 버튼 (Header에서 사용하기 위해 포탈 대신 고정 위치) ── */}
+      <button
+        type="button"
+        className="fixed top-3 left-3 z-50 lg:hidden p-2 rounded-md bg-white border shadow-sm"
+        onClick={() => setMobileOpen((v) => !v)}
+        aria-label="메뉴 열기"
+      >
+        {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </button>
+
+      {/* ── 데스크탑 사이드바 ── */}
+      <aside className="hidden lg:flex w-60 border-r bg-white p-4 flex-col shrink-0">
+        {navContent}
+      </aside>
+
+      {/* ── 모바일 오버레이 사이드바 ── */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          {/* 배경 딤 */}
+          <div
+            className="absolute inset-0 bg-black/30"
+            onClick={() => setMobileOpen(false)}
+          />
+          {/* 슬라이드 패널 */}
+          <aside className="absolute left-0 top-0 h-full w-64 bg-white p-4 flex flex-col shadow-xl animate-in slide-in-from-left duration-200">
+            {navContent}
+          </aside>
+        </div>
+      )}
+    </>
   );
 }
-

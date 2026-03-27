@@ -1,3 +1,4 @@
+// app/(main)/forecasts/new/_components/StepCalculation.tsx
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateWithDay } from "@/lib/utils";
@@ -31,7 +32,8 @@ export function StepCalculation({ hook }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* 데스크탑: 기존 가로 배치 */}
+      <div className="hidden lg:flex items-center justify-between">
         <h2 className="text-lg font-semibold">
           STEP 2. 수량 산출 — {currentTarget.product.product_name}
           <span className="ml-3 text-base font-normal text-muted-foreground">
@@ -41,6 +43,19 @@ export function StepCalculation({ hook }: Props) {
           </span>
         </h2>
         <Badge>{currentTargetIndex + 1} / {targets.length}</Badge>
+      </div>
+
+      {/* 모바일: 세로 배치 */}
+      <div className="lg:hidden space-y-1">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold">
+            STEP 2. 수량 산출
+          </h2>
+          <Badge>{currentTargetIndex + 1} / {targets.length}</Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {currentTarget.product.product_name} · 출고일: <span className="font-semibold text-foreground">{formatDateWithDay(currentTarget.deliveryDate)}</span>
+        </p>
       </div>
 
       {step2Loading ? (
