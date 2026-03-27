@@ -1,3 +1,4 @@
+// app/(main)/forecasts/new/page.tsx
 "use client";
 
 import { StepIndicator } from "./_components/StepIndicator";
@@ -17,7 +18,7 @@ export default function ForecastNewPage() {
   } = hook;
 
   return (
-    <div className="space-y-6 max-w-7xl">
+    <div className="space-y-4 lg:space-y-6 max-w-7xl">
       <StepIndicator currentStep={step} />
 
       {step === 1 && (

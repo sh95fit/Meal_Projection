@@ -1,4 +1,4 @@
-// app/(main)/dashboard/page.tsx (전체 교체)
+// app/(main)/dashboard/page.tsx
 "use client";
 
 import { useDashboard } from "./_hooks/useDashboard";
@@ -6,7 +6,7 @@ import { RealtimeSection } from "./_components/RealtimeSection";
 import { TrendChartSection } from "./_components/TrendChartSection";
 import { DrilldownDetailSection } from "./_components/DrilldownDetailSection";
 import { ClientChangeSection } from "./_components/ClientChangeSection";
-import { ClientDetailModal } from "./_components/ClientDetailModal";  // ★ 추가
+import { ClientDetailModal } from "./_components/ClientDetailModal";
 import { Button } from "@/components/ui/button";
 
 export default function DashboardPage() {
@@ -21,16 +21,15 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 lg:space-y-6">
       {/* ── 헤더 ── */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">대시보드</h1>
+        <h1 className="text-xl lg:text-2xl font-bold">대시보드</h1>
         <Button variant="outline" size="sm" onClick={h.refreshAll}>
           ↻ 새로고침
         </Button>
       </div>
 
-      {/* ── 섹션 1: 실시간 현황 ── */}
       <RealtimeSection
         data={h.realtime}
         loading={h.realtimeLoading}
@@ -38,7 +37,6 @@ export default function DashboardPage() {
         onDateChange={h.setRealtimeDate}
       />
 
-      {/* ── 섹션 2: 추이 차트 (자체 필터 포함) ── */}
       <TrendChartSection
         data={h.trend}
         onBarClick={h.openDrilldown}
@@ -53,7 +51,6 @@ export default function DashboardPage() {
         loading={h.trendLoading}
       />
 
-      {/* ── 섹션 3: 드릴다운 상세 ── */}
       {h.drilldownOpen && h.drilldownDate && (
         <DrilldownDetailSection
           data={h.drilldownDetail}
@@ -63,7 +60,6 @@ export default function DashboardPage() {
         />
       )}
 
-      {/* ── 섹션 4: 고객 변동 (자체 필터 포함) ── */}
       <ClientChangeSection
         data={h.clients}
         preset={h.clientPreset}
@@ -73,11 +69,10 @@ export default function DashboardPage() {
         onPresetChange={h.setClientPreset}
         onCustomRangeChange={h.setClientCustomRange}
         onDowScopeChange={h.setDowScope}
-        onClientClick={h.openClientModal}           // ★ console.log → openClientModal
+        onClientClick={h.openClientModal}
         loading={h.clientsLoading}
       />
 
-      {/* ── ★ 고객사 상세 모달 ── */}
       <ClientDetailModal
         open={h.clientModalOpen}
         loading={h.clientModalLoading}

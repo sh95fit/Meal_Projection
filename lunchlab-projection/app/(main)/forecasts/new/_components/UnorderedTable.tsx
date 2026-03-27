@@ -1,3 +1,4 @@
+// app/(main)/forecasts/new/_components/UnorderedTable.tsx
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,15 @@ interface Props {
   onUpdateQty: (accountId: number, qty: number) => void;
 }
 
+function RefRow({ label, value, bold }: { label: string; value: number | string; bold?: boolean }) {
+  return (
+    <div className="flex justify-between text-[11px]">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`tabular-nums ${bold ? "font-semibold" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
 export function UnorderedTable({
   allRows, filteredRows,
   searchQuery, includeFilter, recentOrderFilter,
@@ -27,44 +37,100 @@ export function UnorderedTable({
 }: Props) {
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="px-4 lg:px-6">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">
+          <CardTitle className="text-sm lg:text-base">
             미주문 고객사 ({allRows.length}개사) — 수량 반영
           </CardTitle>
-          <span className="text-sm text-muted-foreground">표시: {filteredRows.length}개사</span>
+          <span className="text-xs lg:text-sm text-muted-foreground">표시: {filteredRows.length}개사</span>
         </div>
-        <div className="flex flex-wrap items-center gap-3 pt-2">
+        <div className="flex flex-wrap items-center gap-2 lg:gap-3 pt-2">
           <AccountSearchInput
             accounts={allRows}
             onQueryChange={onSearchChange}
           />
           <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground mr-1">포함:</span>
+            <span className="text-[10px] lg:text-xs text-muted-foreground mr-0.5 lg:mr-1">포함:</span>
             {([["all", "전체"], ["included", "포함"], ["excluded", "미포함"]] as const).map(([val, label]) => (
               <Badge
                 key={val}
                 variant={includeFilter === val ? "default" : "outline"}
-                className="cursor-pointer text-xs"
+                className="cursor-pointer text-[10px] lg:text-xs"
                 onClick={() => onIncludeFilterChange(val)}
               >{label}</Badge>
             ))}
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground mr-1">최근주문:</span>
+            <span className="text-[10px] lg:text-xs text-muted-foreground mr-0.5 lg:mr-1">최근주문:</span>
             {([["all", "전체"], ["has", "있음"], ["none", "없음"]] as const).map(([val, label]) => (
               <Badge
                 key={val}
                 variant={recentOrderFilter === val ? "default" : "outline"}
-                className="cursor-pointer text-xs"
+                className="cursor-pointer text-[10px] lg:text-xs"
                 onClick={() => onRecentOrderFilterChange(val)}
               >{label}</Badge>
             ))}
           </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <div className="max-h-[500px] overflow-auto">
+      <CardContent className="px-4 lg:px-6">
+        {/* 모바일: 카드형 리스트 */}
+        <div className="lg:hidden max-h-[500px] overflow-auto space-y-2">
+          {filteredRows.map((row) => (
+            <div
+              key={row.account_id}
+              className={`border rounded-lg p-3 space-y-2 ${row.is_included ? "" : "opacity-40"}`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={row.is_included}
+                    onCheckedChange={() => onToggleIncluded(row.account_id)}
+                  />
+                  <span className="text-sm font-medium">{row.고객사명}</span>
+                </div>
+                <Badge variant={row.주문요일_해당여부 === "포함" ? "default" : "secondary"} className="text-[10px]">
+                  {row.주문요일_해당여부}
+                </Badge>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                <RefRow label="전체 평균" value={row.전체_평균} />
+                <RefRow label="전체 중간값" value={row.전체_중간값} />
+                <RefRow label="상품 전체평균" value={row.상품_전체_평균} />
+                <RefRow label="상품 전체중간" value={row.상품_전체_중간값} />
+                <RefRow label="요일 평균" value={row.요일별_평균} />
+                <RefRow label="요일 중간값" value={row.요일별_중간값} />
+                <RefRow label="상품 요일평균" value={row.상품_요일별_평균} bold />
+                <RefRow label="상품 요일중간" value={row.상품_요일별_중간값} bold />
+                <RefRow label="최근 주문" value={row.해당요일_최근주문일자 || "-"} />
+                <RefRow label="주문 횟수" value={row.해당요일_주문횟수} />
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t">
+                <span className="text-xs text-muted-foreground">반영 수량</span>
+                <Input
+                  type="number"
+                  className="w-20 text-right h-7 text-sm"
+                  value={row.adjusted_qty}
+                  onChange={(e) => {
+                    const parsed = parseInt(e.target.value);
+                    onUpdateQty(row.account_id, isNaN(parsed) ? 0 : parsed);
+                  }}
+                  disabled={!row.is_included}
+                />
+              </div>
+            </div>
+          ))}
+          {filteredRows.length === 0 && (
+            <p className="text-center py-6 text-muted-foreground text-sm">
+              {searchQuery || includeFilter !== "all" || recentOrderFilter !== "all"
+                ? "필터 조건에 맞는 고객사가 없습니다."
+                : "미주문 고객사가 없습니다."}
+            </p>
+          )}
+        </div>
+
+        {/* 데스크탑: 기존 테이블 */}
+        <div className="hidden lg:block max-h-[500px] overflow-auto">
           <Table containerClassName="overflow-visible">
             <TableHeader>
               <TableRow>

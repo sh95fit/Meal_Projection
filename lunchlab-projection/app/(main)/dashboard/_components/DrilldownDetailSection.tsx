@@ -1,4 +1,4 @@
-// app/(main)/dashboard/_components/DrilldownDetailSection.tsx (전체 교체)
+// app/(main)/dashboard/_components/DrilldownDetailSection.tsx
 "use client";
 
 import { useState, useMemo } from "react";
@@ -14,10 +14,6 @@ import type {
   ProductChip,
 } from "@/types/dashboard";
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-
 interface Props {
   data: DrilldownDetailResponse | null;
   date: string;
@@ -26,10 +22,6 @@ interface Props {
 }
 
 type WeekdayFilter = "all" | "lapsed" | "new" | "unassigned";
-
-/* ------------------------------------------------------------------ */
-/*  FilterTab                                                          */
-/* ------------------------------------------------------------------ */
 
 function FilterTab({
   label, count, active, onClick,
@@ -40,23 +32,19 @@ function FilterTab({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+      className={`inline-flex items-center gap-1 px-2.5 py-1 lg:px-3 lg:py-1.5 rounded-full text-[10px] lg:text-xs font-medium border transition-all shrink-0 ${
         active
           ? "bg-gray-900 text-white border-gray-900"
           : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
       }`}
     >
       {label}
-      <span className={`text-[10px] ${active ? "text-gray-300" : "text-gray-400"}`}>
+      <span className={`text-[9px] lg:text-[10px] ${active ? "text-gray-300" : "text-gray-400"}`}>
         {count}
       </span>
     </button>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  SummaryCard                                                        */
-/* ------------------------------------------------------------------ */
 
 function SummaryCard({
   label, value, className,
@@ -64,17 +52,14 @@ function SummaryCard({
   label: string; value: string | number; className?: string;
 }) {
   return (
-    <div className={`rounded-lg border p-3 text-center ${className ?? ""}`}>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-xl font-bold mt-1">{value}</p>
+    <div className={`rounded-lg border p-2 lg:p-3 text-center ${className ?? ""}`}>
+      <p className="text-[10px] lg:text-xs text-muted-foreground">{label}</p>
+      <p className="text-lg lg:text-xl font-bold mt-0.5 lg:mt-1">{value}</p>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  computeNetSummary — 전체 순증 = 상품별 순증 합계 정합성 보장       */
-/* ------------------------------------------------------------------ */
-
+/* ── computeNetSummary — 전체 순증 = 상품별 순증 합계 정합성 보장 ── */
 function computeNetSummary(
   clients: WeekdayCaseClient[],
   filter: WeekdayFilter,
@@ -82,7 +67,6 @@ function computeNetSummary(
 ) {
   const filtered = filter === "all" ? clients : clients.filter((c) => c.case === filter);
 
-  // ★ 수정: totalNet도 상품별과 동일한 기준으로 계산하여 정합성 보장
   let totalNet = 0;
   const productNetMap = new Map<string, number>();
 
@@ -106,20 +90,34 @@ function computeNetSummary(
   return { totalNet, productNets };
 }
 
-/* ------------------------------------------------------------------ */
-/*  DrilldownDetailSection                                             */
-/* ------------------------------------------------------------------ */
+/* ── 순증 표시 컴포넌트 (모바일 줄바꿈 대응) ── */
+function NetSummaryDisplay({ totalNet, productNets }: { totalNet: number; productNets: { name: string; color: string; net: number }[] }) {
+  return (
+    <div className="flex items-center gap-2 lg:gap-3 text-xs flex-wrap">
+      <span className="text-gray-500">순증:</span>
+      <span className={`font-bold ${totalNet > 0 ? "text-blue-600" : totalNet < 0 ? "text-red-600" : "text-gray-400"}`}>
+        전체 {totalNet > 0 ? "+" : ""}{totalNet}
+      </span>
+      {productNets.map((pn) => (
+        <span key={pn.name} className="inline-flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: pn.color }} />
+          <span className={`font-medium ${pn.net > 0 ? "text-blue-600" : "text-red-600"}`}>
+            {pn.net > 0 ? "+" : ""}{pn.net}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function DrilldownDetailSection({ data, date, loading, onClose }: Props) {
   const [weekdayFilter, setWeekdayFilter] = useState<WeekdayFilter>("all");
 
-  /* ── C-2: 요일 순증감 (기존 useMemo 유지) ── */
   const weekdayNetSummary = useMemo(() => {
     if (!data) return { totalNet: 0, productNets: [] };
     return computeNetSummary(data.weekdayClients, weekdayFilter, data.productChips);
   }, [data, weekdayFilter]);
 
-  /* ── C-2: 수량 특이 고객사 필터링 + QuantityClient 변환 (useMemo 추가) ── */
   const filteredQuantityClients = useMemo<QuantityClient[]>(() => {
     if (!data) return [];
     const weekdayAccountIds = new Set(data.weekdayClients.map((c) => c.accountId));
@@ -143,7 +141,6 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
       }));
   }, [data]);
 
-  /* ── C-2: 수량 순증감 계산 (useMemo 추가) ── */
   const { qtyTotalNet, qtyProductNets } = useMemo(() => {
     if (!data) {
       return {
@@ -176,7 +173,6 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
     return { qtyTotalNet: totalNet, qtyProductNets: productNets };
   }, [filteredQuantityClients, data]);
 
-  /* ── Loading ── */
   if (loading) {
     return (
       <Card>
@@ -190,12 +186,11 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
 
   if (!data) return null;
 
-  /* ── Render ── */
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="pb-2 lg:pb-4">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">
+          <CardTitle className="text-base lg:text-lg">
             📅 {date} ({data.dow}) 상세 분석
           </CardTitle>
           <Button variant="ghost" size="icon" onClick={onClose}>
@@ -204,9 +199,9 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-6">
-        {/* ──────────────── Summary Cards ──────────────── */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <CardContent className="space-y-4 lg:space-y-6">
+        {/* Summary Cards — 모바일 2열, 태블릿+ 5열 */}
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 lg:gap-3">
           <SummaryCard label="주문 고객사" value={data.orderedCount} />
           <SummaryCard label="미주문 고객사" value={data.unorderedCount} />
           <SummaryCard label="총 수량" value={data.totalQty.toLocaleString()} />
@@ -214,12 +209,12 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
           <SummaryCard label="이탈" value={data.lapsedCount} className="border-red-200 bg-red-50/50" />
         </div>
 
-        {/* ──────────────── Product Chips ──────────────── */}
-        <div className="flex flex-wrap gap-2">
+        {/* Product Chips — 가로 스크롤 */}
+        <div className="flex flex-wrap gap-1.5 lg:gap-2">
           {data.productChips.map((chip) => (
             <span
               key={chip.productId}
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-white"
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 lg:px-3 lg:py-1 text-[10px] lg:text-xs font-medium text-white"
               style={{ backgroundColor: chip.color }}
             >
               {chip.productName}
@@ -228,35 +223,24 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
           ))}
         </div>
 
-        {/* ──────────────── 요일 기준 특이 고객사 ──────────────── */}
+        {/* 요일 기준 특이 고객사 */}
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
+          <CardHeader className="pb-2 lg:pb-3">
+            <CardTitle className="text-sm lg:text-base">
               요일 기준 특이 고객사 (전주 동일 요일 비교)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center gap-2 flex-wrap">
+            {/* 필터 탭 — 가로 스크롤 */}
+            <div className="flex items-center gap-1.5 lg:gap-2 overflow-x-auto pb-1 -mx-1 px-1">
               <FilterTab label="전체" count={data.weekdaySummary.total} active={weekdayFilter === "all"} onClick={() => setWeekdayFilter("all")} />
-              <FilterTab label="전주 O → 금주 X" count={data.weekdaySummary.lapsed} active={weekdayFilter === "lapsed"} onClick={() => setWeekdayFilter("lapsed")} />
-              <FilterTab label="전주 X → 금주 O" count={data.weekdaySummary.new} active={weekdayFilter === "new"} onClick={() => setWeekdayFilter("new")} />
+              <FilterTab label="전주O→금주X" count={data.weekdaySummary.lapsed} active={weekdayFilter === "lapsed"} onClick={() => setWeekdayFilter("lapsed")} />
+              <FilterTab label="전주X→금주O" count={data.weekdaySummary.new} active={weekdayFilter === "new"} onClick={() => setWeekdayFilter("new")} />
               <FilterTab label="요일 미지정" count={data.weekdaySummary.unassigned} active={weekdayFilter === "unassigned"} onClick={() => setWeekdayFilter("unassigned")} />
-
-              <div className="ml-auto flex items-center gap-3 text-xs">
-                <span className="text-gray-500">순증:</span>
-                <span className={`font-bold ${weekdayNetSummary.totalNet > 0 ? "text-blue-600" : weekdayNetSummary.totalNet < 0 ? "text-red-600" : "text-gray-400"}`}>
-                  전체 {weekdayNetSummary.totalNet > 0 ? "+" : ""}{weekdayNetSummary.totalNet}
-                </span>
-                {weekdayNetSummary.productNets.map((pn) => (
-                  <span key={pn.name} className="inline-flex items-center gap-1">
-                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: pn.color }} />
-                    <span className={`font-medium ${pn.net > 0 ? "text-blue-600" : "text-red-600"}`}>
-                      {pn.net > 0 ? "+" : ""}{pn.net}
-                    </span>
-                  </span>
-                ))}
-              </div>
             </div>
+
+            {/* 순증 — 별도 줄 */}
+            <NetSummaryDisplay totalNet={weekdayNetSummary.totalNet} productNets={weekdayNetSummary.productNets} />
 
             <WeekdayTable
               clients={data.weekdayClients}
@@ -268,27 +252,14 @@ export function DrilldownDetailSection({ data, date, loading, onClose }: Props) 
           </CardContent>
         </Card>
 
-        {/* ──────────────── 수량 기준 이상치 ──────────────── */}
+        {/* 수량 기준 이상치 */}
         <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <CardTitle className="text-base">
+          <CardHeader className="pb-2 lg:pb-3">
+            <div className="space-y-2">
+              <CardTitle className="text-sm lg:text-base">
                 수량 기준 이상치 (전주 대비 차이 ±3 이상)
               </CardTitle>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="text-gray-500">순증:</span>
-                <span className={`font-bold ${qtyTotalNet > 0 ? "text-blue-600" : qtyTotalNet < 0 ? "text-red-600" : "text-gray-400"}`}>
-                  전체 {qtyTotalNet > 0 ? "+" : ""}{qtyTotalNet}
-                </span>
-                {qtyProductNets.map((pn) => (
-                  <span key={pn.name} className="inline-flex items-center gap-1">
-                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: pn.color }} />
-                    <span className={`font-medium ${pn.net > 0 ? "text-blue-600" : "text-red-600"}`}>
-                      {pn.net > 0 ? "+" : ""}{pn.net}
-                    </span>
-                  </span>
-                ))}
-              </div>
+              <NetSummaryDisplay totalNet={qtyTotalNet} productNets={qtyProductNets} />
             </div>
           </CardHeader>
           <CardContent>
