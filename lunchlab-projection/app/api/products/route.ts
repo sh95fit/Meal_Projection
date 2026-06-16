@@ -22,6 +22,7 @@ export async function GET() {
 }
 
 /** POST /api/products */
+/** POST /api/products */
 export async function POST(request: NextRequest) {
   try {
     await requireAuth();
@@ -37,9 +38,10 @@ export async function POST(request: NextRequest) {
     const product = await createProduct({
       product_name: body.product_name,
       offset_days: body.offset_days,
-      saturday_available: body.saturday_available,  // ★ 추가
+      saturday_available: body.saturday_available,
       notification_group: body.notification_group,
       color: body.color,
+      mappings: body.mappings,
     });
 
     return NextResponse.json(product, { status: 201 });

@@ -20,12 +20,18 @@ const PRODUCT_SELECT_FIELDS =
 // B. Input 타입
 // ──────────────────────────────────────────────────────────────────
 
+export interface MappingInput {
+  channel: "web" | "app";
+  external_id: string;
+}
+
 export interface CreateProductInput {
   product_name: string;
   offset_days?: number;
   saturday_available?: boolean;
   notification_group?: string;
   color?: string;
+  mappings?: MappingInput[];
 }
 
 export interface UpdateProductInput {
@@ -34,6 +40,7 @@ export interface UpdateProductInput {
   saturday_available?: boolean;
   notification_group?: string;
   color?: string;
+  mappings?: MappingInput[];  
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -176,8 +183,21 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
 
   if (error) throw new Error(error.message);
 
-  invalidateCacheByPrefix("product"); 
-  invalidateCacheByPrefix("allProducts");  
+  // ★ 매핑 저장
+  if (input.mappings && input.mappings.length > 0) {
+    const mappingRows = input.mappings.map((m) => ({
+      product_id: data.id,
+      channel: m.channel,
+      external_id: m.external_id,
+    }));
+    const { error: mapErr } = await supabase
+      .from("product_id_mappings")
+      .insert(mappingRows);
+    if (mapErr) throw new Error(mapErr.message);
+  }
+
+  invalidateCacheByPrefix("product");
+  invalidateCacheByPrefix("allProducts");
   return { ...data, saturday_available: data.saturday_available ?? false };
 }
 
@@ -201,21 +221,56 @@ export async function updateProduct(id: number, input: UpdateProductInput): Prom
     updates.color = input.color;
   }
 
-  if (Object.keys(updates).length === 0) {
+  // 매핑만 변경되는 경우에도 동작하도록 조건 완화
+  if (Object.keys(updates).length === 0 && input.mappings === undefined) {
     throw new Error("수정할 항목이 없습니다.");
   }
 
-  const { data, error } = await supabase
-    .from("products")
-    .update(updates)
-    .eq("id", id)
-    .select(PRODUCT_SELECT_FIELDS)
-    .single();
+  let data;
 
-  if (error) throw new Error(error.message);
+  if (Object.keys(updates).length > 0) {
+    const result = await supabase
+      .from("products")
+      .update(updates)
+      .eq("id", id)
+      .select(PRODUCT_SELECT_FIELDS)
+      .single();
+    if (result.error) throw new Error(result.error.message);
+    data = result.data;
+  } else {
+    // 매핑만 바뀐 경우 기존 product 데이터 조회
+    const result = await supabase
+      .from("products")
+      .select(PRODUCT_SELECT_FIELDS)
+      .eq("id", id)
+      .single();
+    if (result.error) throw new Error(result.error.message);
+    data = result.data;
+  }
 
-  invalidateCacheByPrefix("product"); 
-  invalidateCacheByPrefix("allProducts");  
+  // ★ 매핑 동기화: 기존 삭제 → 새로 삽입 (전체 교체 방식)
+  if (input.mappings !== undefined) {
+    const { error: delErr } = await supabase
+      .from("product_id_mappings")
+      .delete()
+      .eq("product_id", id);
+    if (delErr) throw new Error(delErr.message);
+
+    if (input.mappings.length > 0) {
+      const mappingRows = input.mappings.map((m) => ({
+        product_id: id,
+        channel: m.channel,
+        external_id: m.external_id,
+      }));
+      const { error: insErr } = await supabase
+        .from("product_id_mappings")
+        .insert(mappingRows);
+      if (insErr) throw new Error(insErr.message);
+    }
+  }
+
+  invalidateCacheByPrefix("product");
+  invalidateCacheByPrefix("allProducts");
   return { ...data, saturday_available: data.saturday_available ?? false };
 }
 
