@@ -40,9 +40,10 @@ export async function PATCH(
     const product = await updateProduct(Number(id), {
       product_name: body.product_name,
       offset_days: body.offset_days,
-      saturday_available: body.saturday_available,  // ★ 추가
+      saturday_available: body.saturday_available,
       notification_group: body.notification_group,
       color: body.color,
+      mappings: body.mappings,   // ★ 추가
     });
 
     return NextResponse.json(product);
