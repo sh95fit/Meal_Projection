@@ -203,6 +203,7 @@ async function getWebOrdersByDate(dateStr: string): Promise<
         AND o.delivery_date >= '${DATA_START_DATE}'
         AND o.deleted_at IS NULL AND od.deleted_at IS NULL
         AND o.id NOT IN (SELECT order_id FROM trial_order_ids)
+        AND od.is_refund=0         
       GROUP BY a.id, a.name, od.product_id
     ),
     trial AS (
@@ -222,6 +223,7 @@ async function getWebOrdersByDate(dateStr: string): Promise<
         AND ts.deleted_at IS NULL AND tso.deleted_at IS NULL
         AND o.deleted_at IS NULL AND od.deleted_at IS NULL
         AND a.status = 'considering'
+        AND od.is_refund=0
       GROUP BY a.id, a.name, od.product_id
     ),
     combined AS (
@@ -548,6 +550,7 @@ export async function getTrendData(
        WHERE o.delivery_date >= ? AND o.delivery_date <= ?
          AND o.delivery_date >= '${DATA_START_DATE}'
          AND o.deleted_at IS NULL AND od.deleted_at IS NULL
+         AND od.is_refund=0
        GROUP BY o.delivery_date, od.product_id
        ORDER BY o.delivery_date`,
       [closedDates[0], closedDates[closedDates.length - 1]]
