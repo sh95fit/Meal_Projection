@@ -97,7 +97,7 @@ export async function getOrderSummary(
         JOIN schedules s ON s.id = sm.schedule_id
         JOIN order_profiles op ON op.id = sm.order_profile_id
         JOIN accounts a ON a.record_id = op.company_id
-        WHERE a.status = 'available'
+        WHERE a.status IN ('available', 'scheduled', 'considering')
           AND sm.is_skipped = 0
           AND s.delivery_on >= '2025-09-01'
           AND s.delivery_on = ?
